@@ -1,0 +1,103 @@
+name: New extension submission
+description: Submit your extension to the BApp Store for review.
+type: Extension
+labels: ["Professional"]
+projects: ["PortSwigger/1"]
+body:
+- type: markdown
+  attributes:
+    value: |
+      Provide the extension name as the title.
+      Extension names should describe the functionality the extension is providing.
+      Find the full BApp Store submission criteria [here](https://portswigger.net/burp/documentation/desktop/extend-burp/extensions/creating/bapp-store-acceptance-criteria).
+
+- type: input
+  id: extension_url
+  attributes:
+    label: Extension URL
+    description: A link to the extension repository on GitHub.
+    placeholder: https://github.com/owner/repo
+  validations:
+    required: true
+
+- type: input
+  id: version_number
+  attributes:
+    label: Version number
+    description: The version number of your extension to be displayed.
+    placeholder: 1.0.0
+  validations:
+    required: true
+
+- type: input
+  id: author_name
+  attributes:
+    label: Author name
+    description: The name you would like to be credited as the author.
+  validations:
+    required: true
+
+- type: input
+  id: contact
+  attributes:
+    label: Contact Details
+    description: |
+      How can we get in touch with you if we need more info?
+
+      **Note: This information will be publicly viewable on GitHub.**
+    placeholder: ex. email@example.com
+  validations:
+    required: false
+
+- type: input
+  id: discord
+  attributes:
+    label: Discord username
+    description: |
+      On successful publication to the BApp Store, you will be eligible for the "BApp Author" Discord role on the [PortSwigger Discord server](https://discord.gg/portswigger). This will allow us to tag you in monthly roundups and gives you access to an exclusive channel with other published extension authors. If you would like this role, please provide your Discord username.
+
+      **Note: This information will be publicly viewable on GitHub.**
+  validations:
+    required: false
+
+- type: checkboxes
+  id: confirmation
+  attributes:
+    label: "I confirm that the following is true:"
+    options:
+    - label: I have permission from all relevant persons to submit this extension to the BApp Store for public use, under the [terms and conditions of the EULA](https://portswigger.net/legal).
+      # validations:
+      #   required: true
+    - label: I have read and understood the [submission requirements for the BApp Store](https://portswigger.net/burp/documentation/desktop/extend-burp/extensions/creating/bapp-store-acceptance-criteria).
+      # validations:
+      #   required: true
+
+- type: markdown
+  attributes:
+    value: |
+      # Additional information
+    
+- type: textarea
+  id: extension_overview
+  attributes:
+    label: Extension overview
+    description: A summary of how your extension is useful for the user, the functionality it provides.
+
+- type: textarea
+  id: extension_features
+  attributes:
+    label: Key features
+    description: A list of the key features of your extension.
+
+- type: textarea
+  id: usage_instructions
+  attributes:
+    label: Usage instructions
+    description: A step by step guide for how to use your extension.
+
+- type: checkboxes
+  id: template_identifier
+  attributes:
+    label: "Template identifier"
+    options:
+      - label: "template:01-submit-extension"

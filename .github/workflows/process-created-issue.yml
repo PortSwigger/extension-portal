@@ -1,0 +1,505 @@
+name: Process created issue
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  create-jira-ticket:
+    if: "contains(github.event.issue.body, 'template:01-submit-extension')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Extract issue details
+        id: extract
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            try {
+              const body = context.payload.issue.body || '';
+              const EMPTY_RESPONSE = '_No response_';
+
+              const sanitizeText = (text, maxLength = 200) => {
+                if (!text) return '';
+                return text
+                  .replace(/[<>\"'`]/g, '')
+                  .replace(/[\r\n\t]/g, ' ')
+                  .replace(/[^\x20-\x7E]/g, '')
+                  .substring(0, maxLength)
+                  .trim();
+              };
+
+              const validateVersion = (version) => {
+                if (!version) return null;
+                const trimmed = version.trim();
+                if (!/^[0-9a-zA-Z.-]+$/.test(trimmed) || trimmed.length > 50) {
+                  throw new Error(`Invalid version format: "${trimmed}". Only alphanumeric characters, dots, and hyphens are allowed.`);
+                }
+                return trimmed;
+              };
+
+              const extractField = (pattern, defaultValue = 'Not provided') => {
+                const match = body.match(pattern);
+                return match ? match[1].trim() : defaultValue;
+              };
+
+              const isFieldEmpty = (value) => !value || value === EMPTY_RESPONSE;
+
+              const extensionUrl = extractField(/### Extension URL\s+([^\s]+)/, null);
+              const versionNumber = validateVersion(extractField(/### Version number\s+([^\n]+)/, null));
+              const authorName = sanitizeText(extractField(/### Author name\s+([^\n]+)/, null), 100);
+
+              const issueTitle = sanitizeText(context.payload.issue.title, 200);
+
+              const missingFields = [];
+              if (isFieldEmpty(extensionUrl)) missingFields.push('Extension URL');
+              if (isFieldEmpty(versionNumber)) missingFields.push('Version number');
+              if (isFieldEmpty(authorName)) missingFields.push('Author name');
+
+              if (missingFields.length > 0) {
+                throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+              }
+
+              core.setOutput('extension_url', extensionUrl);
+              core.setOutput('version_number', versionNumber);
+              core.setOutput('author_name', authorName);
+              core.setOutput('sanitized_title', issueTitle);
+            } catch (error) {
+              core.setOutput('error_message', error.message);
+              throw error;
+            }
+
+      - name: Validate GitHub repository URL
+        id: validate_repo
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            try {
+              const extensionUrl = process.env.EXTENSION_URL;
+
+              if (extensionUrl.length > 500) {
+                throw new Error(`URL exceeds maximum length of 500 characters`);
+              }
+
+              const match = extensionUrl.match(/^(?:https:\/\/)?(?:www\.)?github\.com\/([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?)\/([a-zA-Z0-9_.-]{1,100})$/);
+
+              if (!match) {
+                throw new Error(`Invalid GitHub URL: "${extensionUrl}". Expected format: https://github.com/owner/repo`);
+              }
+
+              const [, owner, repo] = match;
+
+              // Verify repository exists and is not a fork
+              try {
+                const response = await github.rest.repos.get({ owner, repo });
+
+                if (response.data.fork) {
+                  throw new Error(
+                    `Repository ${owner}/${repo} is a fork. ` +
+                    `Extensions must be original work, not derivatives of other repositories. ` +
+                    `Please submit the original repository instead.`
+                  );
+                }
+
+                core.debug(`Validated repository: ${owner}/${repo}`);
+              } catch (error) {
+                if (error.status === 404) {
+                  throw new Error(`GitHub repository not found: ${owner}/${repo}`);
+                }
+                // Re-throw our fork error or other errors
+                throw error;
+              }
+
+              // Output normalized URL
+              const normalizedUrl = `https://github.com/${owner}/${repo}`;
+              core.setOutput('normalized_url', normalizedUrl);
+            } catch (error) {
+              core.setOutput('error_message', error.message);
+              throw error;
+            }
+        env:
+          EXTENSION_URL: ${{ steps.extract.outputs.extension_url }}
+
+      - name: Update issue with normalized and sanitized values
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const originalUrl = process.env.ORIGINAL_URL;
+            const normalizedUrl = process.env.NORMALIZED_URL;
+            const sanitizedAuthorName = process.env.SANITIZED_AUTHOR_NAME;
+            const validatedVersion = process.env.VALIDATED_VERSION;
+
+            const currentBody = context.payload.issue.body || '';
+
+            if (currentBody.length > 100000) {
+              core.warning('Issue body too large to safely process, skipping update');
+            } else {
+              let updatedBody = currentBody;
+              let hasChanges = false;
+
+              // Update URL if changed
+              if (originalUrl !== normalizedUrl) {
+                updatedBody = updatedBody.replace(
+                  /### Extension URL\s+([^\s]{1,500})/,
+                  `### Extension URL\n${normalizedUrl}`
+                );
+                hasChanges = true;
+                core.debug(`Updated URL: ${originalUrl} → ${normalizedUrl}`);
+              }
+
+              const versionMatch = updatedBody.match(/### Version number\s+([^\n]+)/);
+              if (versionMatch && versionMatch[1].trim() !== validatedVersion) {
+                updatedBody = updatedBody.replace(
+                  /### Version number\s+([^\n]+)/,
+                  `### Version number\n${validatedVersion}`
+                );
+                hasChanges = true;
+                core.debug(`Sanitized version number: ${versionMatch[1].trim()} → ${validatedVersion}`);
+              }
+
+              const authorMatch = updatedBody.match(/### Author name\s+([^\n]+)/);
+              if (authorMatch && authorMatch[1].trim() !== sanitizedAuthorName) {
+                updatedBody = updatedBody.replace(
+                  /### Author name\s+([^\n]+)/,
+                  `### Author name\n${sanitizedAuthorName}`
+                );
+                hasChanges = true;
+                core.debug(`Sanitized author name: "${authorMatch[1].trim()}" → "${sanitizedAuthorName}"`);
+              }
+
+              if (hasChanges) {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: updatedBody
+                });
+                core.debug('Issue body updated with sanitized values');
+              } else {
+                core.debug('No changes needed - all values already correct');
+              }
+            }
+        env:
+          ORIGINAL_URL: ${{ steps.extract.outputs.extension_url }}
+          NORMALIZED_URL: ${{ steps.validate_repo.outputs.normalized_url }}
+          SANITIZED_AUTHOR_NAME: ${{ steps.extract.outputs.author_name }}
+          VALIDATED_VERSION: ${{ steps.extract.outputs.version_number }}
+
+      - name: Create Jira ticket
+        id: create_jira
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const sanitizedTitle = process.env.SANITIZED_TITLE;
+            const issueUrl = context.payload.issue.html_url;
+
+            const jiraAuth = Buffer.from(`${process.env.JIRA_USER_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
+            const jiraHeaders = { 'Authorization': `Basic ${jiraAuth}`, 'Content-Type': 'application/json' };
+
+            // Create Jira ticket
+            const createResponse = await fetch(`${process.env.JIRA_BASE_URL}/rest/api/3/issue`, {
+              method: 'POST',
+              headers: jiraHeaders,
+              body: JSON.stringify({
+                fields: {
+                  project: { key: process.env.JIRA_PROJECT_KEY },
+                  summary: sanitizedTitle,
+                  issuetype: { id: "10278" },
+                  customfield_10932: process.env.NORMALIZED_URL,
+                  customfield_12030: "extensions-build-pipeline"
+                }
+              })
+            });
+
+            if (!createResponse.ok) {
+              const errorText = await createResponse.text();
+              core.warning(`Jira API error: ${createResponse.status} - ${errorText}`);
+              
+              throw new Error(`Failed to create Jira ticket: ${createResponse.status}`);
+            }
+
+            const jiraIssue = await createResponse.json();
+            const jiraKey = jiraIssue.key;
+            core.debug(`Created Jira ticket: ${jiraKey}`);
+
+            // Add remote link to GitHub issue
+            const linkResponse = await fetch(`${process.env.JIRA_BASE_URL}/rest/api/3/issue/${jiraKey}/remotelink`, {
+              method: 'POST',
+              headers: jiraHeaders,
+              body: JSON.stringify({
+                object: {
+                  url: issueUrl,
+                  title: `GitHub Issue #${context.issue.number}: ${sanitizedTitle}`,
+                  icon: { url16x16: "https://github.githubassets.com/favicons/favicon.svg", title: "GitHub" }
+                }
+              })
+            });
+
+            if (!linkResponse.ok) {
+              const linkErrorText = await linkResponse.text();
+              core.warning(`Failed to add remote link: ${linkResponse.status} - ${linkErrorText}`);
+            } else {
+              core.debug('Added remote link to Jira ticket');
+            }
+
+            core.setOutput('jira_key', jiraKey);
+            core.setOutput('jira_url', `${process.env.JIRA_BASE_URL}/browse/${jiraKey}`);
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_PROJECT_KEY: ${{ secrets.JIRA_PROJECT_KEY }}
+          NORMALIZED_URL: ${{ steps.validate_repo.outputs.normalized_url }}
+          SANITIZED_TITLE: ${{ steps.extract.outputs.sanitized_title }}
+
+      - name: Post success comment
+        if: success()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const message = [
+              'Thank you for your BApp Store extension submission!',
+              '',
+              'Your submission has been added to our review queue.',
+              '',
+              'We will review your extension as soon as possible. You can track the progress of your submission in our [Extension submissions](https://github.com/orgs/PortSwigger/projects/1) project.',
+              '',
+              'If you have any questions, please comment on this issue. For urgent matters, contact [bapps@portswigger.net](mailto:bapps@portswigger.net). We do not respond to status update requests via email.'
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: message
+            });
+
+      - name: Handle failure
+        if: failure()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            // Try to get specific error message from failed steps
+            const extractError = process.env.EXTRACT_ERROR || '';
+            const validateError = process.env.VALIDATE_ERROR || '';
+
+            const specificError = extractError || validateError;
+
+            const message = specificError
+              ? [
+                  '❌ Submission failed.',
+                  '',
+                  `**Error:** ${specificError}`,
+                  '',
+                  'Please correct the issue and submit a new request.'
+                ].join('\n')
+              : [
+                  '❌ Submission failed.',
+                  '',
+                  'Your submission could not be processed. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance.'
+                ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: message
+            });
+
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed',
+              state_reason: 'not_planned'
+            });
+        env:
+          EXTRACT_ERROR: ${{ steps.extract.outputs.error_message }}
+          VALIDATE_ERROR: ${{ steps.validate_repo.outputs.error_message }}
+
+  send-webhook-notification:
+    if: "contains(github.event.issue.body, 'template:02-submit-update')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Extract issue details
+        id: extract
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            try {
+              const body = context.payload.issue.body || '';
+              const EMPTY_RESPONSE = '_No response_';
+
+              const validateVersion = (version) => {
+                if (!version) return null;
+                const trimmed = version.trim();
+                // Allow common version formats: 1.0.0, v1.0, 2.3.4-beta, 1.0-SNAPSHOT, etc.
+                // Only alphanumeric, dots, hyphens - no special chars that could cause injection
+                if (!/^[0-9a-zA-Z.-]+$/.test(trimmed) || trimmed.length > 50) {
+                  throw new Error(`Invalid version format: "${trimmed}". Only alphanumeric characters, dots, and hyphens are allowed.`);
+                }
+                return trimmed;
+              };
+
+              const validatePrUrl = (url) => {
+                if (!url) return null;
+                const trimmed = url.trim();
+                // Security: Length check to prevent ReDoS
+                if (trimmed.length > 500) {
+                  throw new Error('PR URL exceeds maximum length');
+                }
+                // Only accept GitHub PR URLs
+                const pattern = /^https:\/\/github\.com\/[a-zA-Z0-9_.-]{1,100}\/[a-zA-Z0-9_.-]{1,100}\/pull\/\d+$/;
+                if (!pattern.test(trimmed)) {
+                  throw new Error(`Invalid GitHub PR URL format: "${trimmed}". Expected: https://github.com/owner/repo/pull/123`);
+                }
+                return trimmed;
+              };
+
+              const extractField = (pattern, defaultValue = 'Not provided') => {
+                const match = body.match(pattern);
+                return match ? match[1].trim() : defaultValue;
+              };
+
+              const sanitizeText = (text, maxLength = 200) => {
+                if (!text) return '';
+                return text
+                  .replace(/[<>\"'`]/g, '')
+                  .replace(/[\r\n\t]/g, ' ')
+                  .replace(/[^\x20-\x7E]/g, '')
+                  .substring(0, maxLength)
+                  .trim();
+              };
+
+              const isFieldEmpty = (value) => !value || value === EMPTY_RESPONSE;
+
+              const prUrl = validatePrUrl(extractField(/### Pull request URL\s+([^\s]+)/, null));
+              const versionNumber = validateVersion(extractField(/### Version number\s+([^\n]+)/, null));
+              const issueTitle = sanitizeText(context.payload.issue.title, 200);
+
+              const missingFields = [];
+              if (isFieldEmpty(prUrl)) missingFields.push('Pull request URL');
+              if (isFieldEmpty(versionNumber)) missingFields.push('Version number');
+
+              if (missingFields.length > 0) {
+                throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+              }
+
+              core.setOutput('pr_url', prUrl);
+              core.setOutput('version_number', versionNumber);
+              core.setOutput('sanitized_title', issueTitle);
+            } catch (error) {
+              core.setOutput('error_message', error.message);
+              throw error;
+            }
+
+      - name: Send Zoom webhook notification
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const sanitizedTitle = process.env.SANITIZED_TITLE;
+            const prUrl = process.env.PR_URL;
+            const versionNumber = process.env.VERSION_NUMBER;
+            const issueUrl = context.payload.issue.html_url;
+
+            const payload = {
+              "Extension": sanitizedTitle,
+              "Version": versionNumber,
+              "PR": prUrl,
+              "Issue": issueUrl
+            };
+
+            const webhookUrl = `${process.env.ZOOM_WEBHOOK_URL}?format=fields`;
+
+            const response = await fetch(webhookUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': process.env.ZOOM_VERIFICATION_TOKEN
+              },
+              body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              core.warning(`Zoom webhook error: ${response.status} - ${errorText}`);
+              
+              throw new Error(`Failed to send Zoom webhook: ${response.status}`);
+            }
+
+            core.debug('Successfully sent webhook notification to Zoom');
+        env:
+          ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
+          ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
+          PR_URL: ${{ steps.extract.outputs.pr_url }}
+          VERSION_NUMBER: ${{ steps.extract.outputs.version_number }}
+          SANITIZED_TITLE: ${{ steps.extract.outputs.sanitized_title }}
+
+      - name: Post success comment
+        if: success()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const message = [
+              'Thank you for your extension update!',
+              '',
+              'Your update has been received and our team has been notified.',
+              '',
+              'We will review your update as soon as possible. You can track the progress in our [Extension submissions](https://github.com/orgs/PortSwigger/projects/1) project.',
+              '',
+              'If you have any questions, please comment on this issue. For urgent matters, contact [bapps@portswigger.net](mailto:bapps@portswigger.net).'
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: message
+            });
+
+      - name: Handle failure
+        if: failure()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const extractError = process.env.EXTRACT_ERROR || '';
+
+            const specificError = extractError;
+
+            const message = specificError
+              ? [
+                  '❌ Update submission failed.',
+                  '',
+                  `**Error:** ${specificError}`,
+                  '',
+                  'Please correct the issue and submit a new request.'
+                ].join('\n')
+              : [
+                  '❌ Update submission failed.',
+                  '',
+                  'Your update could not be processed. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance.'
+                ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: message
+            });
+
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed',
+              state_reason: 'not_planned'
+            });
+        env:
+          EXTRACT_ERROR: ${{ steps.extract.outputs.error_message }}

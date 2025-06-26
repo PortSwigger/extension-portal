@@ -1,0 +1,77 @@
+name: Update for existing extension
+description: Let us know about an update to an existing extension on the BApp Store.
+type: Update
+projects: ["PortSwigger/1"]
+body:
+- type: markdown
+  attributes:
+    value: |
+      Provide the name of the extension you are updating as the title.
+      
+      Updates are accepted from the parent repository of the PortSwigger fork.
+      For any further clarifications, contact us at [bapps@portswigger.net](mailto:bapps@portswigger.net).
+
+- type: input
+  id: pr_url
+  attributes:
+    label: Pull request URL
+    description: A link to the pull request for your update.
+  validations:
+    required: true
+
+- type: input
+  id: version_number
+  attributes:
+    label: Version number
+    description: The version number of your extension to be displayed.
+  validations:
+    required: true
+
+- type: input
+  id: author_name
+  attributes:
+    label: Author name update
+    description: The name you would like to be credited as the author.
+  validations:
+    required: false
+
+- type: input
+  id: contact
+  attributes:
+    label: Contact Details
+    description: |
+      How can we get in touch with you if we need more info?
+
+      **Note: This information will be publicly viewable on GitHub.**
+    placeholder: ex. email@example.com
+  validations:
+    required: false
+
+- type: input
+  id: discord
+  attributes:
+    label: Discord username
+    description: |
+      If you don't already have the "BApp Author" Discord role on the [PortSwigger Discord server](https://discord.gg/portswigger) and would like it, please provide your Discord username. This role allows us to tag you in monthly roundups and gives you access to an exclusive channel with other published extension authors.
+
+      **Note: This information will be publicly viewable on GitHub.**
+  validations:
+    required: false
+
+- type: markdown
+  attributes:
+    value: |
+      # Additional information
+    
+- type: textarea
+  id: update_summary
+  attributes:
+    label: Update summary
+    description: A summary of the changes made by the update.
+
+- type: checkboxes
+  id: template_identifier
+  attributes:
+    label: "Template identifier"
+    options:
+      - label: "template:02-submit-update"

@@ -1,0 +1,28 @@
+name: Create parent for update
+description: PortSwigger use only. Create a parent ticket for an extension update.
+type: Extension
+labels: ["Professional"]
+projects: ["PortSwigger/1"]
+body:
+- type: input
+  id: extension_url
+  attributes:
+    label: Extension URL
+    description: A link to the extension repository on GitHub.
+  validations:
+    required: true
+
+- type: input
+  id: author_name
+  attributes:
+    label: Author name
+    description: The name you would like to be credited as the author.
+  validations:
+    required: true
+
+- type: checkboxes
+  id: template_identifier
+  attributes:
+    label: "Template identifier"
+    options:
+      - label: "template:03-create-parent-for-update"
