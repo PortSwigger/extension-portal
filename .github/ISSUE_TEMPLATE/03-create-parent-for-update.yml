@@ -2,7 +2,6 @@ name: Create parent for update
 description: PortSwigger use only. Create a parent ticket for an extension update.
 type: Extension
 labels: ["Professional"]
-projects: ["PortSwigger/1"]
 body:
 - type: input
   id: extension_url

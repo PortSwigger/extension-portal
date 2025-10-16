@@ -1,7 +1,6 @@
 name: Update for existing extension
 description: Let us know about an update to an existing extension on the BApp Store.
 type: Update
-projects: ["PortSwigger/1"]
 body:
 - type: markdown
   attributes:
