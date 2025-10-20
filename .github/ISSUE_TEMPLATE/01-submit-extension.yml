@@ -9,6 +9,7 @@ body:
       Provide the extension name as the title.
       Extension names should describe the functionality the extension is providing.
       Find the full BApp Store submission criteria [here](https://portswigger.net/burp/documentation/desktop/extend-burp/extensions/creating/bapp-store-acceptance-criteria).
+      **Additional: Adjust the labels on this ticket to inform us of product compatibility.**
 
 - type: input
   id: extension_url
@@ -65,11 +66,11 @@ body:
     label: "I confirm that the following is true:"
     options:
     - label: I have permission from all relevant persons to submit this extension to the BApp Store for public use, under the [terms and conditions of the EULA](https://portswigger.net/legal).
-      # validations:
-      #   required: true
+      validations:
+        required: true
     - label: I have read and understood the [submission requirements for the BApp Store](https://portswigger.net/burp/documentation/desktop/extend-burp/extensions/creating/bapp-store-acceptance-criteria).
-      # validations:
-      #   required: true
+      validations:
+        required: true
 
 - type: markdown
   attributes:
