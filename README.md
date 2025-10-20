@@ -58,7 +58,9 @@ All submissions are tracked in our [Extension submissions](https://github.com/or
 
 ### Responding to Feedback
 
-If feedback is provided that requires changes to your extension, the issue will be closed. Once you have implemented the required feedback, please reopen the issue ticket to have your extension reviewed again.
+If feedback is provided that requires changes to your extension, the issue will be closed. Once you have implemented the required feedback, you can reopen the issue ticket to have your extension reviewed again.
+
+**To reopen your issue:** Simply comment `/reopen` on the closed issue. As the original issue creator, this will automatically reopen your submission for review.
 
 ## Questions or Issues?
 
