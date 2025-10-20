@@ -66,11 +66,9 @@ body:
     label: "I confirm that the following is true:"
     options:
     - label: I have permission from all relevant persons to submit this extension to the BApp Store for public use, under the [terms and conditions of the EULA](https://portswigger.net/legal).
-      validations:
-        required: true
+      required: true
     - label: I have read and understood the [submission requirements for the BApp Store](https://portswigger.net/burp/documentation/desktop/extend-burp/extensions/creating/bapp-store-acceptance-criteria).
-      validations:
-        required: true
+      required: true
 
 - type: markdown
   attributes:
