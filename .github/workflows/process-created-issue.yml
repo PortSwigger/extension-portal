@@ -257,42 +257,6 @@ jobs:
           NORMALIZED_URL: ${{ steps.validate_repo.outputs.normalized_url }}
           SANITIZED_TITLE: ${{ steps.extract.outputs.sanitized_title }}
 
-      - name: Send Zoom webhook notification
-        if: success()
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          script: |
-            const sanitizedTitle = process.env.SANITIZED_TITLE;
-            const jiraUrl = process.env.JIRA_URL;
-
-            const payload = {
-              "Extension": sanitizedTitle,
-              "Jira Ticket": jiraUrl
-            };
-
-            const webhookUrl = `${process.env.ZOOM_WEBHOOK_URL}?format=fields`;
-
-            const response = await fetch(webhookUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': process.env.ZOOM_VERIFICATION_TOKEN
-              },
-              body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) {
-              const errorText = await response.text();
-              core.warning(`Zoom webhook error: ${response.status} - ${errorText}`);
-            } else {
-              core.debug('Successfully sent webhook notification to Zoom');
-            }
-        env:
-          ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
-          ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
-          SANITIZED_TITLE: ${{ steps.extract.outputs.sanitized_title }}
-          JIRA_URL: ${{ steps.create_jira.outputs.jira_url }}
-
       - name: Post success comment
         if: success()
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
@@ -357,6 +321,42 @@ jobs:
         env:
           EXTRACT_ERROR: ${{ steps.extract.outputs.error_message }}
           VALIDATE_ERROR: ${{ steps.validate_repo.outputs.error_message }}
+
+      - name: Send Zoom webhook notification
+        if: always()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const sanitizedTitle = process.env.SANITIZED_TITLE;
+            const jiraUrl = process.env.JIRA_URL;
+
+            const payload = {
+              "Extension": sanitizedTitle,
+              "Jira Ticket": jiraUrl || 'Not created'
+            };
+
+            const webhookUrl = `${process.env.ZOOM_WEBHOOK_URL}?format=fields`;
+
+            const response = await fetch(webhookUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': process.env.ZOOM_VERIFICATION_TOKEN
+              },
+              body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              core.warning(`Zoom webhook error: ${response.status} - ${errorText}`);
+            } else {
+              core.debug('Successfully sent webhook notification to Zoom');
+            }
+        env:
+          ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
+          ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
+          SANITIZED_TITLE: ${{ steps.extract.outputs.sanitized_title }}
+          JIRA_URL: ${{ steps.create_jira.outputs.jira_url }}
 
   send-webhook-notification:
     if: "contains(github.event.issue.body, 'template:02-submit-update')"
