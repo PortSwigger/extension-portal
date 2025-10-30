@@ -1,0 +1,41 @@
+name: Post Issue Comment
+
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        description: 'Issue number to comment on'
+        required: true
+        type: number
+      comment_body:
+        description: 'Comment body (markdown supported)'
+        required: true
+        type: string
+
+permissions:
+  issues: write
+
+jobs:
+  post-comment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Post comment to issue
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const issueNumber = parseInt(process.env.ISSUE_NUMBER);
+            const body = process.env.COMMENT_BODY;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: body
+            });
+
+            core.info(`Posted comment to issue #${issueNumber}`);
+        env:
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          COMMENT_BODY: ${{ inputs.comment_body }}

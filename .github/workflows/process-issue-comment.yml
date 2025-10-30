@@ -15,6 +15,8 @@ jobs:
     outputs:
       zoom_payload: ${{ steps.prepare_payload.outputs.payload }}
       should_notify: ${{ steps.prepare_payload.outputs.should_notify }}
+      comment_body: ${{ steps.check_archived.outputs.comment || steps.check_creator.outputs.comment }}
+      should_post_comment: ${{ steps.check_archived.outputs.comment != '' || steps.check_creator.outputs.comment != '' }}
 
     steps:
       - name: Check if comment is a reopen request
@@ -40,6 +42,8 @@ jobs:
             echo "is_creator=true" >> $GITHUB_OUTPUT
           else
             echo "is_creator=false" >> $GITHUB_OUTPUT
+            # Set non-creator comment
+            echo "comment=⚠️ Only the original issue creator can reopen this issue using the \`/reopen\` command. Please ask a maintainer for assistance or create a new issue if needed." >> $GITHUB_OUTPUT
           fi
 
       - name: Check if issue is archived
@@ -92,6 +96,8 @@ jobs:
               if (!isOnProject) {
                 core.info('Issue not found on project board - appears to be archived');
                 core.setOutput('is_archived', 'true');
+                // Set archived issue comment
+                core.setOutput('comment', '⚠️ This issue appears to be archived and has been removed from the project board.\n\nOur team has been notified and will manually restore it before reopening.\n\nPlease allow some time for this to be processed.');
               } else {
                 core.info('Issue is on the project board');
                 core.setOutput('is_archived', 'false');
@@ -123,26 +129,6 @@ jobs:
             core.setOutput('payload', JSON.stringify(payload));
             core.setOutput('should_notify', 'true');
 
-      - name: Comment on archived issue
-        if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_creator.outputs.is_creator == 'true' && steps.check_archived.outputs.is_archived == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const message = [
-              '⚠️ This issue appears to be archived and has been removed from the project board.',
-              '',
-              'Our team has been notified and will manually restore it before reopening.',
-              '',
-              'Please allow some time for this to be processed.'
-            ].join('\n');
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: message
-            });
-
       - name: Reopen issue
         if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_creator.outputs.is_creator == 'true' && steps.check_archived.outputs.is_archived != 'true'
         uses: actions/github-script@v7
@@ -157,18 +143,6 @@ jobs:
 
             core.info('Issue reopened successfully');
 
-      - name: Notify non-creator
-        if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_creator.outputs.is_creator == 'false'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: '⚠️ Only the original issue creator can reopen this issue using the `/reopen` command. Please ask a maintainer for assistance or create a new issue if needed.'
-            });
-
   notify-zoom:
     needs: reopen-issue
     if: needs.reopen-issue.outputs.should_notify == 'true'
@@ -178,3 +152,11 @@ jobs:
     secrets:
       ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
       ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
+
+  post-comment:
+    needs: reopen-issue
+    if: needs.reopen-issue.outputs.should_post_comment == 'true'
+    uses: ./.github/workflows/common/post-issue-comment.yml
+    with:
+      issue_number: ${{ github.event.issue.number }}
+      comment_body: ${{ needs.reopen-issue.outputs.comment_body }}
