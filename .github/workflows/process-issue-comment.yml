@@ -39,6 +39,82 @@ jobs:
             echo "is_creator=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Restore to project if archived
+        if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_creator.outputs.is_creator == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = context.issue.number;
+            const projectNumber = 1; // Extension submissions project number
+
+            // Get issue node ID
+            const { data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber
+            });
+
+            const issueNodeId = issue.node_id;
+
+            // Check if issue is on the project board
+            const checkQuery = `
+              query($org: String!, $projectNumber: Int!, $issueId: ID!) {
+                organization(login: $org) {
+                  projectV2(number: $projectNumber) {
+                    id
+                  }
+                }
+                node(id: $issueId) {
+                  ... on Issue {
+                    projectItems(first: 10) {
+                      nodes {
+                        id
+                        project {
+                          ... on ProjectV2 {
+                            number
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+
+            const checkResult = await github.graphql(checkQuery, {
+              org: context.repo.owner,
+              projectNumber: projectNumber,
+              issueId: issueNodeId
+            });
+
+            const projectId = checkResult.organization.projectV2.id;
+            const isOnProject = checkResult.node.projectItems.nodes.some(
+              item => item.project.number === projectNumber
+            );
+
+            if (!isOnProject) {
+              core.info('Issue not found on project board - restoring from archive');
+
+              const addMutation = `
+                mutation($projectId: ID!, $contentId: ID!) {
+                  addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
+                    item {
+                      id
+                    }
+                  }
+                }
+              `;
+
+              await github.graphql(addMutation, {
+                projectId: projectId,
+                contentId: issueNodeId
+              });
+
+              core.info('Issue restored to project board successfully');
+            } else {
+              core.info('Issue is already on the project board');
+            }
+
       - name: Reopen issue
         if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_creator.outputs.is_creator == 'true'
         uses: actions/github-script@v7
@@ -50,6 +126,8 @@ jobs:
               issue_number: context.issue.number,
               state: 'open'
             });
+
+            core.info('Issue reopened successfully');
 
       - name: Notify non-creator
         if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_creator.outputs.is_creator == 'false'
