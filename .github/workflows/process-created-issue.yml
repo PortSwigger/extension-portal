@@ -350,7 +350,7 @@ jobs:
     if: |
       always() &&
       needs.create-jira-ticket.outputs.should_notify == 'true'
-    uses: ./.github/workflows/common/notify-zoom.yml
+    uses: ./.github/workflows/common-notify-zoom.yml
     with:
       payload: ${{ needs.create-jira-ticket.outputs.zoom_payload }}
     secrets:
@@ -527,7 +527,7 @@ jobs:
   notify-zoom-update:
     needs: send-webhook-notification
     if: needs.send-webhook-notification.outputs.should_notify == 'true'
-    uses: ./.github/workflows/common/notify-zoom.yml
+    uses: ./.github/workflows/common-notify-zoom.yml
     with:
       payload: ${{ needs.send-webhook-notification.outputs.zoom_payload }}
     secrets:

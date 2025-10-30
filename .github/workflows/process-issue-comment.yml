@@ -146,7 +146,7 @@ jobs:
   notify-zoom:
     needs: reopen-issue
     if: needs.reopen-issue.outputs.should_notify == 'true'
-    uses: ./.github/workflows/common/notify-zoom.yml
+    uses: ./.github/workflows/common-notify-zoom.yml
     with:
       payload: ${{ needs.reopen-issue.outputs.zoom_payload }}
     secrets:
@@ -156,7 +156,7 @@ jobs:
   post-comment:
     needs: reopen-issue
     if: needs.reopen-issue.outputs.should_post_comment == 'true'
-    uses: ./.github/workflows/common/post-issue-comment.yml
+    uses: ./.github/workflows/common-post-issue-comment.yml
     with:
       issue_number: ${{ github.event.issue.number }}
       comment_body: ${{ needs.reopen-issue.outputs.comment_body }}
