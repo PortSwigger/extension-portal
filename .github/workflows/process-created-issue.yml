@@ -13,6 +13,9 @@ jobs:
     if: "contains(github.event.issue.body, 'template:01-submit-extension')"
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      zoom_payload: ${{ steps.prepare_zoom.outputs.payload }}
+      should_notify: ${{ steps.prepare_zoom.outputs.should_notify }}
 
     steps:
       - name: Extract issue details
@@ -322,7 +325,8 @@ jobs:
           EXTRACT_ERROR: ${{ steps.extract.outputs.error_message }}
           VALIDATE_ERROR: ${{ steps.validate_repo.outputs.error_message }}
 
-      - name: Send Zoom webhook notification
+      - name: Prepare Zoom notification payload
+        id: prepare_zoom
         if: always()
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
@@ -335,33 +339,31 @@ jobs:
               "Jira Ticket": jiraUrl || 'Not created'
             };
 
-            const webhookUrl = `${process.env.ZOOM_WEBHOOK_URL}?format=fields`;
-
-            const response = await fetch(webhookUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': process.env.ZOOM_VERIFICATION_TOKEN
-              },
-              body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) {
-              const errorText = await response.text();
-              core.warning(`Zoom webhook error: ${response.status} - ${errorText}`);
-            } else {
-              core.debug('Successfully sent webhook notification to Zoom');
-            }
+            core.setOutput('payload', JSON.stringify(payload));
+            core.setOutput('should_notify', 'true');
         env:
-          ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
-          ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
           SANITIZED_TITLE: ${{ steps.extract.outputs.sanitized_title }}
           JIRA_URL: ${{ steps.create_jira.outputs.jira_url }}
+
+  notify-zoom-new-extension:
+    needs: create-jira-ticket
+    if: |
+      always() &&
+      needs.create-jira-ticket.outputs.should_notify == 'true'
+    uses: ./.github/workflows/common/notify-zoom.yml
+    with:
+      payload: ${{ needs.create-jira-ticket.outputs.zoom_payload }}
+    secrets:
+      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
+      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
 
   send-webhook-notification:
     if: "contains(github.event.issue.body, 'template:02-submit-update')"
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      zoom_payload: ${{ steps.prepare_zoom.outputs.payload }}
+      should_notify: ${{ steps.prepare_zoom.outputs.should_notify }}
 
     steps:
       - name: Extract issue details
@@ -436,7 +438,8 @@ jobs:
               throw error;
             }
 
-      - name: Send Zoom webhook notification
+      - name: Prepare Zoom notification payload
+        id: prepare_zoom
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -452,28 +455,9 @@ jobs:
               "Issue": issueUrl
             };
 
-            const webhookUrl = `${process.env.ZOOM_WEBHOOK_URL}?format=fields`;
-
-            const response = await fetch(webhookUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': process.env.ZOOM_VERIFICATION_TOKEN
-              },
-              body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) {
-              const errorText = await response.text();
-              core.warning(`Zoom webhook error: ${response.status} - ${errorText}`);
-              
-              throw new Error(`Failed to send Zoom webhook: ${response.status}`);
-            }
-
-            core.debug('Successfully sent webhook notification to Zoom');
+            core.setOutput('payload', JSON.stringify(payload));
+            core.setOutput('should_notify', 'true');
         env:
-          ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
-          ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
           PR_URL: ${{ steps.extract.outputs.pr_url }}
           VERSION_NUMBER: ${{ steps.extract.outputs.version_number }}
           SANITIZED_TITLE: ${{ steps.extract.outputs.sanitized_title }}
@@ -539,3 +523,13 @@ jobs:
             });
         env:
           EXTRACT_ERROR: ${{ steps.extract.outputs.error_message }}
+
+  notify-zoom-update:
+    needs: send-webhook-notification
+    if: needs.send-webhook-notification.outputs.should_notify == 'true'
+    uses: ./.github/workflows/common/notify-zoom.yml
+    with:
+      payload: ${{ needs.send-webhook-notification.outputs.zoom_payload }}
+    secrets:
+      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
+      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}

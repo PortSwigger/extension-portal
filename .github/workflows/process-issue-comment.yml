@@ -12,6 +12,9 @@ jobs:
   reopen-issue:
     if: github.event.issue.state == 'closed'
     runs-on: ubuntu-latest
+    outputs:
+      zoom_payload: ${{ steps.prepare_payload.outputs.payload }}
+      should_notify: ${{ steps.prepare_payload.outputs.should_notify }}
 
     steps:
       - name: Check if comment is a reopen request
@@ -98,7 +101,8 @@ jobs:
               core.setOutput('is_archived', 'unknown');
             }
 
-      - name: Notify team of archived issue reopen request
+      - name: Prepare Zoom notification payload
+        id: prepare_payload
         if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_creator.outputs.is_creator == 'true' && steps.check_archived.outputs.is_archived == 'true'
         uses: actions/github-script@v7
         with:
@@ -116,26 +120,8 @@ jobs:
               "URL": issueUrl
             };
 
-            const webhookUrl = `${process.env.ZOOM_WEBHOOK_URL}?format=fields`;
-
-            const response = await fetch(webhookUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': process.env.ZOOM_VERIFICATION_TOKEN
-              },
-              body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) {
-              const errorText = await response.text();
-              core.warning(`Zoom webhook error: ${response.status} - ${errorText}`);
-            } else {
-              core.info('Notification sent to Zoom - manual restoration required');
-            }
-        env:
-          ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
-          ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
+            core.setOutput('payload', JSON.stringify(payload));
+            core.setOutput('should_notify', 'true');
 
       - name: Comment on archived issue
         if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_creator.outputs.is_creator == 'true' && steps.check_archived.outputs.is_archived == 'true'
@@ -182,3 +168,13 @@ jobs:
               issue_number: context.issue.number,
               body: '⚠️ Only the original issue creator can reopen this issue using the `/reopen` command. Please ask a maintainer for assistance or create a new issue if needed.'
             });
+
+  notify-zoom:
+    needs: reopen-issue
+    if: needs.reopen-issue.outputs.should_notify == 'true'
+    uses: ./.github/workflows/common/notify-zoom.yml
+    with:
+      payload: ${{ needs.reopen-issue.outputs.zoom_payload }}
+    secrets:
+      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
+      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
