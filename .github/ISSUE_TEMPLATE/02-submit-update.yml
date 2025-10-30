@@ -31,8 +31,8 @@ body:
 - type: input
   id: author_name
   attributes:
-    label: Author name update
-    description: The name you would like to be credited as the author.
+    label: Author display name update
+    description: (Optional) Only provide this if you want to change the author name from what is currently displayed on the BApp Store.
   validations:
     required: false
 
@@ -69,6 +69,27 @@ body:
   attributes:
     label: Update summary
     description: A summary of the changes made by the update.
+
+- type: textarea
+  id: bapp_description
+  attributes:
+    label: BApp Description update
+    description: |
+      (Optional) Provide an updated BApp Description for the BApp Store extension information page. This should contain an overview, list of key features, and usage information.
+
+      This description will be displayed on the extension's information page in the BApp Store.
+    placeholder: |
+      ## Overview
+      Brief description of what your extension does...
+
+      ## Key Features
+      - Feature 1
+      - Feature 2
+
+      ## Usage
+      1. First step to use the extension...
+      2. Second step...
+      3. Third step...
 
 - type: checkboxes
   id: template_identifier
