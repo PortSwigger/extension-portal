@@ -15,7 +15,8 @@ jobs:
     timeout-minutes: 10
     outputs:
       zoom_payload: ${{ steps.prepare_zoom.outputs.payload }}
-      should_notify: ${{ steps.prepare_zoom.outputs.should_notify }}
+      comment_body: ${{ steps.prepare_comment.outputs.comment_body }}
+      should_close: ${{ steps.prepare_comment.outputs.should_close }}
 
     steps:
       - name: Extract issue details
@@ -260,70 +261,53 @@ jobs:
           NORMALIZED_URL: ${{ steps.validate_repo.outputs.normalized_url }}
           SANITIZED_TITLE: ${{ steps.extract.outputs.sanitized_title }}
 
-      - name: Post success comment
-        if: success()
+      - name: Prepare comment data
+        id: prepare_comment
+        if: always()
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
-            const message = [
-              'Thank you for your BApp Store extension submission!',
-              '',
-              'Your submission has been added to our review queue.',
-              '',
-              'We will review your extension as soon as possible. You can track the progress of your submission in our [Extension submissions](https://github.com/orgs/PortSwigger/projects/1) project.',
-              '',
-              'If you have any questions, please comment on this issue. For urgent matters, contact [bapps@portswigger.net](mailto:bapps@portswigger.net). We do not respond to status update requests via email.'
-            ].join('\n');
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: message
-            });
-
-      - name: Handle failure
-        if: failure()
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          script: |
-            // Try to get specific error message from failed steps
             const extractError = process.env.EXTRACT_ERROR || '';
             const validateError = process.env.VALIDATE_ERROR || '';
+            const jobSuccess = process.env.JOB_SUCCESS === 'true';
 
-            const specificError = extractError || validateError;
+            let message;
+            let shouldClose = false;
 
-            const message = specificError
-              ? [
-                  '❌ Submission failed.',
-                  '',
-                  `**Error:** ${specificError}`,
-                  '',
-                  'Please correct the issue and submit a new request.'
-                ].join('\n')
-              : [
-                  '❌ Submission failed.',
-                  '',
-                  'Your submission could not be processed. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance.'
-                ].join('\n');
+            if (jobSuccess) {
+              message = [
+                'Thank you for your BApp Store extension submission!',
+                '',
+                'Your submission has been added to our review queue.',
+                '',
+                'We will review your extension as soon as possible. You can track the progress of your submission in our [Extension submissions](https://github.com/orgs/PortSwigger/projects/1) project.',
+                '',
+                'If you have any questions, please comment on this issue. For urgent matters, contact [bapps@portswigger.net](mailto:bapps@portswigger.net). We do not respond to status update requests via email.'
+              ].join('\n');
+            } else {
+              const specificError = extractError || validateError;
+              message = specificError
+                ? [
+                    '❌ Submission failed.',
+                    '',
+                    `**Error:** ${specificError}`,
+                    '',
+                    'Please correct the issue and submit a new request.'
+                  ].join('\n')
+                : [
+                    '❌ Submission failed.',
+                    '',
+                    'Your submission could not be processed. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance.'
+                  ].join('\n');
+              shouldClose = true;
+            }
 
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: message
-            });
-
-            await github.rest.issues.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              state: 'closed',
-              state_reason: 'not_planned'
-            });
+            core.setOutput('comment_body', message);
+            core.setOutput('should_close', shouldClose.toString());
         env:
           EXTRACT_ERROR: ${{ steps.extract.outputs.error_message }}
           VALIDATE_ERROR: ${{ steps.validate_repo.outputs.error_message }}
+          JOB_SUCCESS: ${{ success() }}
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
@@ -340,7 +324,6 @@ jobs:
             };
 
             core.setOutput('payload', JSON.stringify(payload));
-            core.setOutput('should_notify', 'true');
         env:
           SANITIZED_TITLE: ${{ steps.extract.outputs.sanitized_title }}
           JIRA_URL: ${{ steps.create_jira.outputs.jira_url }}
@@ -351,7 +334,8 @@ jobs:
     timeout-minutes: 10
     outputs:
       zoom_payload: ${{ steps.prepare_zoom.outputs.payload }}
-      should_notify: ${{ steps.prepare_zoom.outputs.should_notify }}
+      comment_body: ${{ steps.prepare_comment.outputs.comment_body }}
+      should_close: ${{ steps.prepare_comment.outputs.should_close }}
 
     steps:
       - name: Extract issue details
@@ -444,64 +428,82 @@ jobs:
             };
 
             core.setOutput('payload', JSON.stringify(payload));
-            core.setOutput('should_notify', 'true');
         env:
           PR_URL: ${{ steps.extract.outputs.pr_url }}
           VERSION_NUMBER: ${{ steps.extract.outputs.version_number }}
           SANITIZED_TITLE: ${{ steps.extract.outputs.sanitized_title }}
 
-      - name: Post success comment
-        if: success()
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          script: |
-            const message = [
-              'Thank you for your extension update!',
-              '',
-              'Your update has been received and our team has been notified.',
-              '',
-              'We will review your update as soon as possible. You can track the progress in our [Extension submissions](https://github.com/orgs/PortSwigger/projects/1) project.',
-              '',
-              'If you have any questions, please comment on this issue. For urgent matters, contact [bapps@portswigger.net](mailto:bapps@portswigger.net).'
-            ].join('\n');
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: message
-            });
-
-      - name: Handle failure
-        if: failure()
+      - name: Prepare comment data
+        id: prepare_comment
+        if: always()
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const extractError = process.env.EXTRACT_ERROR || '';
+            const jobSuccess = process.env.JOB_SUCCESS === 'true';
 
-            const specificError = extractError;
+            let message;
+            let shouldClose = false;
 
-            const message = specificError
-              ? [
-                  '❌ Update submission failed.',
-                  '',
-                  `**Error:** ${specificError}`,
-                  '',
-                  'Please correct the issue and submit a new request.'
-                ].join('\n')
-              : [
-                  '❌ Update submission failed.',
-                  '',
-                  'Your update could not be processed. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance.'
-                ].join('\n');
+            if (jobSuccess) {
+              message = [
+                'Thank you for your extension update!',
+                '',
+                'Your update has been received and our team has been notified.',
+                '',
+                'We will review your update as soon as possible. You can track the progress in our [Extension submissions](https://github.com/orgs/PortSwigger/projects/1) project.',
+                '',
+                'If you have any questions, please comment on this issue. For urgent matters, contact [bapps@portswigger.net](mailto:bapps@portswigger.net).'
+              ].join('\n');
+            } else {
+              const specificError = extractError;
+              message = specificError
+                ? [
+                    '❌ Update submission failed.',
+                    '',
+                    `**Error:** ${specificError}`,
+                    '',
+                    'Please correct the issue and submit a new request.'
+                  ].join('\n')
+                : [
+                    '❌ Update submission failed.',
+                    '',
+                    'Your update could not be processed. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance.'
+                  ].join('\n');
+              shouldClose = true;
+            }
 
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: message
-            });
+            core.setOutput('comment_body', message);
+            core.setOutput('should_close', shouldClose.toString());
+        env:
+          EXTRACT_ERROR: ${{ steps.extract.outputs.error_message }}
+          JOB_SUCCESS: ${{ success() }}
 
+  post-comment:
+    needs: [submit-extension, submit-update]
+    if: |
+      always() &&
+      (needs.submit-extension.outputs.comment_body != '' ||
+       needs.submit-update.outputs.comment_body != '')
+    uses: ./.github/workflows/common-post-issue-comment.yml
+    with:
+      issue_number: ${{ github.event.issue.number }}
+      comment_body: ${{ needs.submit-extension.outputs.comment_body || needs.submit-update.outputs.comment_body }}
+
+  close-issue:
+    needs: [submit-extension, submit-update, post-comment]
+    if: |
+      always() &&
+      needs.post-comment.result == 'success' &&
+      (needs.submit-extension.outputs.should_close == 'true' ||
+       needs.submit-update.outputs.should_close == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Close issue
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
             await github.rest.issues.update({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -509,15 +511,13 @@ jobs:
               state: 'closed',
               state_reason: 'not_planned'
             });
-        env:
-          EXTRACT_ERROR: ${{ steps.extract.outputs.error_message }}
 
   notify-zoom:
     needs: [submit-extension, submit-update]
     if: |
       always() &&
-      (needs.submit-extension.outputs.should_notify == 'true' ||
-       needs.submit-update.outputs.should_notify == 'true')
+      (needs.submit-extension.outputs.zoom_payload != '' ||
+       needs.submit-update.outputs.zoom_payload != '')
     uses: ./.github/workflows/common-notify-zoom.yml
     with:
       payload: ${{ needs.submit-extension.outputs.zoom_payload || needs.submit-update.outputs.zoom_payload }}
