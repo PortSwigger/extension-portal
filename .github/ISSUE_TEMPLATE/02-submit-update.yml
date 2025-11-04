@@ -94,6 +94,6 @@ body:
 - type: checkboxes
   id: template_identifier
   attributes:
-    label: "Template identifier"
+    label: "Template identifier (Internal use only - please ignore)"
     options:
       - label: "template:02-submit-update"
