@@ -345,18 +345,6 @@ jobs:
           SANITIZED_TITLE: ${{ steps.extract.outputs.sanitized_title }}
           JIRA_URL: ${{ steps.create_jira.outputs.jira_url }}
 
-  notify-zoom-new-extension:
-    needs: create-jira-ticket
-    if: |
-      always() &&
-      needs.create-jira-ticket.outputs.should_notify == 'true'
-    uses: ./.github/workflows/common-notify-zoom.yml
-    with:
-      payload: ${{ needs.create-jira-ticket.outputs.zoom_payload }}
-    secrets:
-      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
-      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
-
   send-webhook-notification:
     if: "contains(github.event.issue.body, 'template:02-submit-update')"
     runs-on: ubuntu-latest
@@ -524,12 +512,15 @@ jobs:
         env:
           EXTRACT_ERROR: ${{ steps.extract.outputs.error_message }}
 
-  notify-zoom-update:
-    needs: send-webhook-notification
-    if: needs.send-webhook-notification.outputs.should_notify == 'true'
+  notify-zoom:
+    needs: [create-jira-ticket, send-webhook-notification]
+    if: |
+      always() &&
+      (needs.create-jira-ticket.outputs.should_notify == 'true' ||
+       needs.send-webhook-notification.outputs.should_notify == 'true')
     uses: ./.github/workflows/common-notify-zoom.yml
     with:
-      payload: ${{ needs.send-webhook-notification.outputs.zoom_payload }}
+      payload: ${{ needs.create-jira-ticket.outputs.zoom_payload || needs.send-webhook-notification.outputs.zoom_payload }}
     secrets:
       ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
       ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
