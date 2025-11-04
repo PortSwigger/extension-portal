@@ -31,7 +31,7 @@ body:
 - type: input
   id: author_name
   attributes:
-    label: Author display name update
+    label: Author display name
     description: (Optional) Only provide this if you want to change the author name from what is currently displayed on the BApp Store.
   validations:
     required: false
