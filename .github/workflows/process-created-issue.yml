@@ -9,17 +9,21 @@ permissions:
   contents: read
 
 jobs:
-  submit-extension:
-    if: "contains(github.event.issue.body, 'template:01-submit-extension')"
+  extract-issue-details:
+    if: |
+      contains(github.event.issue.body, 'template:01-submit-extension') ||
+      contains(github.event.issue.body, 'template:02-submit-update')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     outputs:
-      zoom_payload: ${{ steps.prepare_zoom.outputs.payload }}
-      comment_body: ${{ steps.prepare_comment.outputs.comment_body }}
-      should_close: ${{ steps.prepare_comment.outputs.should_close }}
+      url: ${{ steps.extract.outputs.url }}
+      version_number: ${{ steps.extract.outputs.version_number }}
+      author: ${{ steps.extract.outputs.author }}
+      title: ${{ steps.extract.outputs.title }}
+      error_message: ${{ steps.extract.outputs.error_message }}
 
     steps:
-      - name: Extract issue details
+      - name: Extract submission details
         id: extract
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
@@ -28,6 +32,7 @@ jobs:
               const body = context.payload.issue.body || '';
               const EMPTY_RESPONSE = '_No response_';
 
+              // Utility functions
               const sanitizeText = (text, maxLength = 200) => {
                 if (!text) return '';
                 return text
@@ -47,44 +52,68 @@ jobs:
                 return trimmed;
               };
 
-              const extractField = (pattern, defaultValue = 'Not provided') => {
+              const extractField = (pattern, defaultValue = null) => {
                 const match = body.match(pattern);
                 return match ? match[1].trim() : defaultValue;
               };
 
               const isFieldEmpty = (value) => !value || value === EMPTY_RESPONSE;
 
-              const extensionUrl = extractField(/### Extension URL\s+([^\s]+)/, null);
-              const versionNumber = validateVersion(extractField(/### Version number\s+([^\n]+)/, null));
-              const authorName = sanitizeText(extractField(/### Author name\s+([^\n]+)/, null), 100);
-
-              const issueTitle = sanitizeText(context.payload.issue.title, 200);
-
               const missingFields = [];
-              if (isFieldEmpty(extensionUrl)) missingFields.push('Extension URL');
+
+              // Extract common fields
+              const versionNumber = validateVersion(extractField(/### Version number\s+([^\n]+)/));
               if (isFieldEmpty(versionNumber)) missingFields.push('Version number');
-              if (isFieldEmpty(authorName)) missingFields.push('Author name');
+              
+              const title = sanitizeText(context.payload.issue.title, 200);
+              const author = sanitizeText(extractField(/### Author display name\s+([^\n]+)/), 100);
+
+              core.setOutput('version_number', versionNumber);
+              core.setOutput('title', title);
+              core.setOutput('author', author);
+
+              let url;
+              if (body.includes('template:01-submit-extension')) {
+                url = extractField(/### Extension URL\s+([^\s]+)/);
+                if (isFieldEmpty(url)) missingFields.push('Extension URL');
+                if (isFieldEmpty(author)) missingFields.push('Author display name');
+              } else if (body.includes('template:02-submit-update')) {
+                url = extractField(/### Pull request URL\s+([^\s]+)/);
+                if (isFieldEmpty(url)) missingFields.push('Pull request URL');
+                // Author is optional for updates
+              }
+
+              core.setOutput('url', url);
 
               if (missingFields.length > 0) {
                 throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
               }
-
-              core.setOutput('extension_url', extensionUrl);
-              core.setOutput('version_number', versionNumber);
-              core.setOutput('author_name', authorName);
-              core.setOutput('sanitized_title', issueTitle);
             } catch (error) {
               core.setOutput('error_message', error.message);
               throw error;
             }
 
+  submit-extension:
+    needs: extract-issue-details
+    if: |
+      always() &&
+      contains(github.event.issue.body, 'template:01-submit-extension')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      zoom_payload: ${{ steps.prepare_zoom.outputs.payload }}
+      comment_body: ${{ steps.prepare_comment.outputs.comment_body }}
+      should_close: ${{ steps.prepare_comment.outputs.should_close }}
+
+    steps:
       - name: Validate GitHub repository URL
         id: validate_repo
+        if: needs.extract-issue-details.outputs.error_message == ''
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             try {
-              const extensionUrl = process.env.EXTENSION_URL;
+              const extensionUrl = process.env.URL;
 
               if (extensionUrl.length > 500) {
                 throw new Error(`URL exceeds maximum length of 500 characters`);
@@ -127,79 +156,15 @@ jobs:
               throw error;
             }
         env:
-          EXTENSION_URL: ${{ steps.extract.outputs.extension_url }}
-
-      - name: Update issue with normalized and sanitized values
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          script: |
-            const originalUrl = process.env.ORIGINAL_URL;
-            const normalizedUrl = process.env.NORMALIZED_URL;
-            const sanitizedAuthorName = process.env.SANITIZED_AUTHOR_NAME;
-            const validatedVersion = process.env.VALIDATED_VERSION;
-
-            const currentBody = context.payload.issue.body || '';
-
-            if (currentBody.length > 100000) {
-              core.warning('Issue body too large to safely process, skipping update');
-            } else {
-              let updatedBody = currentBody;
-              let hasChanges = false;
-
-              // Update URL if changed
-              if (originalUrl !== normalizedUrl) {
-                updatedBody = updatedBody.replace(
-                  /### Extension URL\s+([^\s]{1,500})/,
-                  `### Extension URL\n${normalizedUrl}`
-                );
-                hasChanges = true;
-                core.debug(`Updated URL: ${originalUrl} → ${normalizedUrl}`);
-              }
-
-              const versionMatch = updatedBody.match(/### Version number\s+([^\n]+)/);
-              if (versionMatch && versionMatch[1].trim() !== validatedVersion) {
-                updatedBody = updatedBody.replace(
-                  /### Version number\s+([^\n]+)/,
-                  `### Version number\n${validatedVersion}`
-                );
-                hasChanges = true;
-                core.debug(`Sanitized version number: ${versionMatch[1].trim()} → ${validatedVersion}`);
-              }
-
-              const authorMatch = updatedBody.match(/### Author name\s+([^\n]+)/);
-              if (authorMatch && authorMatch[1].trim() !== sanitizedAuthorName) {
-                updatedBody = updatedBody.replace(
-                  /### Author name\s+([^\n]+)/,
-                  `### Author name\n${sanitizedAuthorName}`
-                );
-                hasChanges = true;
-                core.debug(`Sanitized author name: "${authorMatch[1].trim()}" → "${sanitizedAuthorName}"`);
-              }
-
-              if (hasChanges) {
-                await github.rest.issues.update({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  body: updatedBody
-                });
-                core.debug('Issue body updated with sanitized values');
-              } else {
-                core.debug('No changes needed - all values already correct');
-              }
-            }
-        env:
-          ORIGINAL_URL: ${{ steps.extract.outputs.extension_url }}
-          NORMALIZED_URL: ${{ steps.validate_repo.outputs.normalized_url }}
-          SANITIZED_AUTHOR_NAME: ${{ steps.extract.outputs.author_name }}
-          VALIDATED_VERSION: ${{ steps.extract.outputs.version_number }}
+          URL: ${{ needs.extract-issue-details.outputs.url }}
 
       - name: Create Jira ticket
         id: create_jira
+        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_repo.outputs.error_message == ''
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
-            const sanitizedTitle = process.env.SANITIZED_TITLE;
+            const title = process.env.TITLE;
             const issueUrl = context.payload.issue.html_url;
 
             const jiraAuth = Buffer.from(`${process.env.JIRA_USER_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
@@ -212,7 +177,7 @@ jobs:
               body: JSON.stringify({
                 fields: {
                   project: { key: process.env.JIRA_PROJECT_KEY },
-                  summary: sanitizedTitle,
+                  summary: title,
                   issuetype: { id: "10278" },
                   customfield_10932: process.env.NORMALIZED_URL,
                   customfield_12030: "extensions-build-pipeline"
@@ -238,7 +203,7 @@ jobs:
               body: JSON.stringify({
                 object: {
                   url: issueUrl,
-                  title: `GitHub Issue #${context.issue.number}: ${sanitizedTitle}`,
+                  title: `GitHub Issue #${context.issue.number}: ${title}`,
                   icon: { url16x16: "https://github.githubassets.com/favicons/favicon.svg", title: "GitHub" }
                 }
               })
@@ -251,7 +216,6 @@ jobs:
               core.debug('Added remote link to Jira ticket');
             }
 
-            core.setOutput('jira_key', jiraKey);
             core.setOutput('jira_url', `${process.env.JIRA_BASE_URL}/browse/${jiraKey}`);
         env:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
@@ -259,7 +223,7 @@ jobs:
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           JIRA_PROJECT_KEY: ${{ secrets.JIRA_PROJECT_KEY }}
           NORMALIZED_URL: ${{ steps.validate_repo.outputs.normalized_url }}
-          SANITIZED_TITLE: ${{ steps.extract.outputs.sanitized_title }}
+          TITLE: ${{ needs.extract-issue-details.outputs.title }}
 
       - name: Prepare comment data
         id: prepare_comment
@@ -307,30 +271,35 @@ jobs:
             core.setOutput('comment_body', message);
             core.setOutput('should_close', shouldClose.toString());
         env:
-          EXTRACT_ERROR: ${{ steps.extract.outputs.error_message }}
+          EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
           VALIDATE_ERROR: ${{ steps.validate_repo.outputs.error_message }}
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
-        if: always()
+        if: success()
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
-            const sanitizedTitle = process.env.SANITIZED_TITLE;
+            const title = process.env.TITLE;
             const jiraUrl = process.env.JIRA_URL;
+            const issueUrl = context.payload.issue.html_url;
 
             const payload = {
-              "Extension": sanitizedTitle,
-              "Jira Ticket": jiraUrl || 'Not created'
+              "Extension": title,
+              "Jira Ticket": jiraUrl || 'Not created',
+              "Issue": issueUrl
             };
 
             core.setOutput('payload', JSON.stringify(payload));
         env:
-          SANITIZED_TITLE: ${{ steps.extract.outputs.sanitized_title }}
+          TITLE: ${{ needs.extract-issue-details.outputs.title }}
           JIRA_URL: ${{ steps.create_jira.outputs.jira_url }}
 
   submit-update:
-    if: "contains(github.event.issue.body, 'template:02-submit-update')"
+    needs: extract-issue-details
+    if: |
+      always() &&
+      contains(github.event.issue.body, 'template:02-submit-update')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -339,100 +308,56 @@ jobs:
       should_close: ${{ steps.prepare_comment.outputs.should_close }}
 
     steps:
-      - name: Extract issue details
-        id: extract
+      - name: Validate pull request URL
+        id: validate_pr
+        if: needs.extract-issue-details.outputs.error_message == ''
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             try {
-              const body = context.payload.issue.body || '';
-              const EMPTY_RESPONSE = '_No response_';
+              const prUrl = process.env.URL;
 
-              const validateVersion = (version) => {
-                if (!version) return null;
-                const trimmed = version.trim();
-                // Allow common version formats: 1.0.0, v1.0, 2.3.4-beta, 1.0-SNAPSHOT, etc.
-                // Only alphanumeric, dots, hyphens - no special chars that could cause injection
-                if (!/^[0-9a-zA-Z.-]+$/.test(trimmed) || trimmed.length > 50) {
-                  throw new Error(`Invalid version format: "${trimmed}". Only alphanumeric characters, dots, and hyphens are allowed.`);
-                }
-                return trimmed;
-              };
-
-              const validatePrUrl = (url) => {
-                if (!url) return null;
-                const trimmed = url.trim();
-                // Security: Length check to prevent ReDoS
-                if (trimmed.length > 500) {
-                  throw new Error('PR URL exceeds maximum length');
-                }
-                // Only accept GitHub PR URLs
-                const pattern = /^https:\/\/github\.com\/[a-zA-Z0-9_.-]{1,100}\/[a-zA-Z0-9_.-]{1,100}\/pull\/\d+$/;
-                if (!pattern.test(trimmed)) {
-                  throw new Error(`Invalid GitHub PR URL format: "${trimmed}". Expected: https://github.com/owner/repo/pull/123`);
-                }
-                return trimmed;
-              };
-
-              const extractField = (pattern, defaultValue = 'Not provided') => {
-                const match = body.match(pattern);
-                return match ? match[1].trim() : defaultValue;
-              };
-
-              const sanitizeText = (text, maxLength = 200) => {
-                if (!text) return '';
-                return text
-                  .replace(/[<>\"'`]/g, '')
-                  .replace(/[\r\n\t]/g, ' ')
-                  .replace(/[^\x20-\x7E]/g, '')
-                  .substring(0, maxLength)
-                  .trim();
-              };
-
-              const isFieldEmpty = (value) => !value || value === EMPTY_RESPONSE;
-
-              const prUrl = validatePrUrl(extractField(/### Pull request URL\s+([^\s]+)/, null));
-              const versionNumber = validateVersion(extractField(/### Version number\s+([^\n]+)/, null));
-              const issueTitle = sanitizeText(context.payload.issue.title, 200);
-
-              const missingFields = [];
-              if (isFieldEmpty(prUrl)) missingFields.push('Pull request URL');
-              if (isFieldEmpty(versionNumber)) missingFields.push('Version number');
-
-              if (missingFields.length > 0) {
-                throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+              if (prUrl.length > 500) {
+                throw new Error('PR URL exceeds maximum length');
               }
 
-              core.setOutput('pr_url', prUrl);
-              core.setOutput('version_number', versionNumber);
-              core.setOutput('sanitized_title', issueTitle);
+              const pattern = /^https:\/\/github\.com\/[a-zA-Z0-9_.-]{1,100}\/[a-zA-Z0-9_.-]{1,100}\/pull\/\d+$/;
+              if (!pattern.test(prUrl)) {
+                throw new Error(`Invalid GitHub PR URL format: "${prUrl}". Expected: https://github.com/owner/repo/pull/123`);
+              }
+
+              core.debug(`Validated PR URL: ${prUrl}`);
             } catch (error) {
               core.setOutput('error_message', error.message);
               throw error;
             }
+        env:
+          URL: ${{ needs.extract-issue-details.outputs.url }}
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
+        if: success()
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
-            const sanitizedTitle = process.env.SANITIZED_TITLE;
-            const prUrl = process.env.PR_URL;
+            const title = process.env.TITLE;
+            const prUrl = process.env.URL;
             const versionNumber = process.env.VERSION_NUMBER;
             const issueUrl = context.payload.issue.html_url;
 
             const payload = {
-              "Extension": sanitizedTitle,
+              "Extension": title,
               "Version": versionNumber,
               "PR": prUrl,
-              "Issue": issueUrl
+              "Issue": issueUrl,
+              "Action": "⚠️ Create associated update ticket."
             };
 
             core.setOutput('payload', JSON.stringify(payload));
         env:
-          PR_URL: ${{ steps.extract.outputs.pr_url }}
-          VERSION_NUMBER: ${{ steps.extract.outputs.version_number }}
-          SANITIZED_TITLE: ${{ steps.extract.outputs.sanitized_title }}
+          URL: ${{ needs.extract-issue-details.outputs.url }}
+          VERSION_NUMBER: ${{ needs.extract-issue-details.outputs.version_number }}
+          TITLE: ${{ needs.extract-issue-details.outputs.title }}
 
       - name: Prepare comment data
         id: prepare_comment
@@ -441,9 +366,10 @@ jobs:
         with:
           script: |
             const extractError = process.env.EXTRACT_ERROR || '';
+            const validateError = process.env.VALIDATE_ERROR || '';
 
             // Job is successful if there are no errors
-            const jobSuccess = !extractError;
+            const jobSuccess = !extractError && !validateError;
 
             let message;
             let shouldClose = false;
@@ -459,7 +385,7 @@ jobs:
                 'If you have any questions, please comment on this issue. For urgent matters, contact [bapps@portswigger.net](mailto:bapps@portswigger.net).'
               ].join('\n');
             } else {
-              const specificError = extractError;
+              const specificError = extractError || validateError;
               message = specificError
                 ? [
                     '❌ Update submission failed.',
@@ -479,10 +405,11 @@ jobs:
             core.setOutput('comment_body', message);
             core.setOutput('should_close', shouldClose.toString());
         env:
-          EXTRACT_ERROR: ${{ steps.extract.outputs.error_message }}
+          EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
+          VALIDATE_ERROR: ${{ steps.validate_pr.outputs.error_message }}
 
   post-comment:
-    needs: [submit-extension, submit-update]
+    needs: [extract-issue-details, submit-extension, submit-update]
     if: |
       always() &&
       (needs.submit-extension.outputs.comment_body != '' ||
@@ -493,7 +420,7 @@ jobs:
       comment_body: ${{ needs.submit-extension.outputs.comment_body || needs.submit-update.outputs.comment_body }}
 
   close-issue:
-    needs: [submit-extension, submit-update, post-comment]
+    needs: [extract-issue-details, submit-extension, submit-update, post-comment]
     if: |
       always() &&
       needs.post-comment.result == 'success' &&
@@ -515,7 +442,7 @@ jobs:
             });
 
   notify-zoom:
-    needs: [submit-extension, submit-update]
+    needs: [extract-issue-details, submit-extension, submit-update]
     if: |
       always() &&
       (needs.submit-extension.outputs.zoom_payload != '' ||
