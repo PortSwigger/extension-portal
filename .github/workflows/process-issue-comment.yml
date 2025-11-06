@@ -87,17 +87,19 @@ jobs:
                 item => item.project.number === 1
               );
 
-              const isArchived = projectItem?.isArchived ?? false;
+              // If not found on project board OR explicitly archived, treat as archived
+              const isArchived = !projectItem || projectItem.isArchived;
 
               core.setOutput('is_archived', String(isArchived));
 
               if (isArchived) {
-                core.info('Issue is archived on project board');
+                const reason = !projectItem
+                  ? 'Issue not found on project board'
+                  : 'Issue is archived on project board';
+                core.info(reason);
                 core.setOutput('comment', ARCHIVED_MESSAGE);
               } else {
-                core.info(projectItem
-                  ? 'Issue is on the project board and not archived'
-                  : 'Issue not found on project board');
+                core.info('Issue is on the project board and not archived');
               }
             } catch (error) {
               core.warning(`Unable to check project status: ${error.message}`);
