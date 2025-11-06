@@ -53,27 +53,23 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            try {
-              const issueNumber = context.issue.number;
-              const projectNumber = 1; // Extension submissions project number
+            const ARCHIVED_MESSAGE = '⚠️ This issue appears to be archived and has been removed from the project board.\n\nOur team has been notified and will manually restore it before reopening.\n\nPlease allow some time for this to be processed.';
 
-              // Get issue node ID
+            try {
               const { data: issue } = await github.rest.issues.get({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                issue_number: issueNumber
+                issue_number: context.issue.number
               });
 
-              const issueNodeId = issue.node_id;
-
-              // Check if issue is on the project board
-              const checkQuery = `
+              // Query project items for this issue
+              const { node } = await github.graphql(`
                 query($issueId: ID!) {
                   node(id: $issueId) {
                     ... on Issue {
-                      projectItems(first: 10) {
+                      projectItems(first: 10, includeArchived: true) {
                         nodes {
-                          id
+                          isArchived
                           project {
                             ... on ProjectV2 {
                               number
@@ -84,24 +80,24 @@ jobs:
                     }
                   }
                 }
-              `;
+              `, { issueId: issue.node_id });
 
-              const checkResult = await github.graphql(checkQuery, {
-                issueId: issueNodeId
-              });
-
-              const isOnProject = checkResult.node.projectItems.nodes.some(
-                item => item.project.number === projectNumber
+              // Find the project item for project #1
+              const projectItem = node.projectItems.nodes.find(
+                item => item.project.number === 1
               );
 
-              if (!isOnProject) {
-                core.info('Issue not found on project board - appears to be archived');
-                core.setOutput('is_archived', 'true');
-                // Set archived issue comment
-                core.setOutput('comment', '⚠️ This issue appears to be archived and has been removed from the project board.\n\nOur team has been notified and will manually restore it before reopening.\n\nPlease allow some time for this to be processed.');
+              const isArchived = projectItem?.isArchived ?? false;
+
+              core.setOutput('is_archived', String(isArchived));
+
+              if (isArchived) {
+                core.info('Issue is archived on project board');
+                core.setOutput('comment', ARCHIVED_MESSAGE);
               } else {
-                core.info('Issue is on the project board');
-                core.setOutput('is_archived', 'false');
+                core.info(projectItem
+                  ? 'Issue is on the project board and not archived'
+                  : 'Issue not found on project board');
               }
             } catch (error) {
               core.warning(`Unable to check project status: ${error.message}`);
