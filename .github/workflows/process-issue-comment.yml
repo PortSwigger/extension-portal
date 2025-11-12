@@ -26,7 +26,7 @@ jobs:
           # Truncate to first 10 characters and trim whitespace
           COMMENT_PREFIX=$(echo "$COMMENT" | cut -c1-10 | xargs)
 
-          if [[ "$COMMENT_PREFIX" == /reopen* ]]; then
+          if [[ "$COMMENT_PREFIX" == "/reopen"* ]]; then
             echo "is_reopen_request=true" >> $GITHUB_OUTPUT
           else
             echo "is_reopen_request=false" >> $GITHUB_OUTPUT
