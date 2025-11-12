@@ -21,10 +21,11 @@ jobs:
     steps:
       - name: Check if comment is a reopen request
         id: check_comment
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          COMMENT="${{ github.event.comment.body }}"
           # Truncate to first 10 characters and trim whitespace
-          COMMENT_PREFIX=$(echo "$COMMENT" | cut -c1-10 | xargs)
+          COMMENT_PREFIX=$(echo "$COMMENT_BODY" | cut -c1-10 | xargs)
 
           if [[ "$COMMENT_PREFIX" == "/reopen"* ]]; then
             echo "is_reopen_request=true" >> $GITHUB_OUTPUT
