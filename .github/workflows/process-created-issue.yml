@@ -106,52 +106,51 @@ jobs:
       should_close: ${{ steps.prepare_comment.outputs.should_close }}
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Validate GitHub repository URL
+        id: validate_url
+        run: |
+          python3 .github/scripts/validate_repo_url.py "${{ needs.extract-issue-details.outputs.url }}" new-submission
+
+      - name: Verify repository exists and is not a fork
         id: validate_repo
         if: needs.extract-issue-details.outputs.error_message == ''
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             try {
-              const extensionUrl = process.env.URL;
+              const url = process.env.URL;
 
-              if (extensionUrl.length > 500) {
-                throw new Error(`URL exceeds maximum length of 500 characters`);
-              }
-
-              const match = extensionUrl.match(/^(?:https:\/\/)?(?:www\.)?github\.com\/([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?)\/([a-zA-Z0-9_.-]{1,100})$/);
-
+              // Extract owner and repo from URL
+              const match = url.match(/(?:https:\/\/)?(?:www\.)?github\.com\/([^\/]+)\/([^\/]+)/);
               if (!match) {
-                throw new Error(`Invalid GitHub URL: "${extensionUrl}". Expected format: https://github.com/owner/repo`);
+                throw new Error(`Could not extract owner/repo from URL: ${url}`);
               }
 
-              const [, owner, repo] = match;
-
-              // Verify repository exists and is not a fork
-              try {
-                const response = await github.rest.repos.get({ owner, repo });
-
-                if (response.data.fork) {
-                  throw new Error(
-                    `Repository ${owner}/${repo} is a fork. ` +
-                    `Extensions must be original work, not derivatives of other repositories. ` +
-                    `Please submit the original repository instead.`
-                  );
-                }
-
-                core.debug(`Validated repository: ${owner}/${repo}`);
-              } catch (error) {
-                if (error.status === 404) {
-                  throw new Error(`GitHub repository not found: ${owner}/${repo}`);
-                }
-                // Re-throw our fork error or other errors
-                throw error;
-              }
-
-              // Output normalized URL
+              const owner = match[1];
+              const repo = match[2].replace(/\/$/, ''); // Remove trailing slash
               const normalizedUrl = `https://github.com/${owner}/${repo}`;
+
+              const response = await github.rest.repos.get({ owner, repo });
+
+              if (response.data.fork) {
+                throw new Error(
+                  `Repository ${owner}/${repo} is a fork. ` +
+                  `Extensions must be original work, not derivatives of other repositories. ` +
+                  `Please submit the original repository instead.`
+                );
+              }
+
               core.setOutput('normalized_url', normalizedUrl);
+              core.debug(`Validated repository: ${owner}/${repo}`);
             } catch (error) {
+              if (error.status === 404) {
+                const match = process.env.URL.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+                const repo_name = match ? `${match[1]}/${match[2].replace(/\/$/, '')}` : 'unknown';
+                throw new Error(`GitHub repository not found: ${repo_name}`);
+              }
               core.setOutput('error_message', error.message);
               throw error;
             }
@@ -160,7 +159,7 @@ jobs:
 
       - name: Create Jira ticket
         id: create_jira
-        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_repo.outputs.error_message == ''
+        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_url.conclusion == 'success' && steps.validate_repo.conclusion == 'success'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -232,10 +231,11 @@ jobs:
         with:
           script: |
             const extractError = process.env.EXTRACT_ERROR || '';
-            const validateError = process.env.VALIDATE_ERROR || '';
+            const validateUrlError = process.env.VALIDATE_URL_ERROR || '';
+            const validateRepoError = process.env.VALIDATE_REPO_ERROR || '';
 
             // Job is successful if there are no errors
-            const jobSuccess = !extractError && !validateError;
+            const jobSuccess = !extractError && !validateUrlError && !validateRepoError;
 
             let message;
             let shouldClose = false;
@@ -251,7 +251,7 @@ jobs:
                 'If you have any questions, please comment on this issue. For urgent matters, contact [bapps@portswigger.net](mailto:bapps@portswigger.net). We do not respond to status update requests via email.'
               ].join('\n');
             } else {
-              const specificError = extractError || validateError;
+              const specificError = extractError || validateUrlError || validateRepoError;
               message = specificError
                 ? [
                     '❌ Submission failed.',
@@ -272,7 +272,8 @@ jobs:
             core.setOutput('should_close', shouldClose.toString());
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
-          VALIDATE_ERROR: ${{ steps.validate_repo.outputs.error_message }}
+          VALIDATE_URL_ERROR: ${{ steps.validate_url.outputs.error_message || '' }}
+          VALIDATE_REPO_ERROR: ${{ steps.validate_repo.outputs.error_message || '' }}
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
@@ -308,31 +309,13 @@ jobs:
       should_close: ${{ steps.prepare_comment.outputs.should_close }}
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Validate pull request URL
         id: validate_pr
         if: needs.extract-issue-details.outputs.error_message == ''
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          script: |
-            try {
-              const prUrl = process.env.URL;
-
-              if (prUrl.length > 500) {
-                throw new Error('PR URL exceeds maximum length');
-              }
-
-              const pattern = /^https:\/\/github\.com\/[a-zA-Z0-9_.-]{1,100}\/[a-zA-Z0-9_.-]{1,100}\/pull\/\d+$/;
-              if (!pattern.test(prUrl)) {
-                throw new Error(`Invalid GitHub PR URL format: "${prUrl}". Expected: https://github.com/owner/repo/pull/123`);
-              }
-
-              core.debug(`Validated PR URL: ${prUrl}`);
-            } catch (error) {
-              core.setOutput('error_message', error.message);
-              throw error;
-            }
-        env:
-          URL: ${{ needs.extract-issue-details.outputs.url }}
+        run: python3 .github/scripts/validate_repo_url.py "${{ needs.extract-issue-details.outputs.url }}"
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
