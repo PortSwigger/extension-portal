@@ -111,8 +111,13 @@ jobs:
 
       - name: Validate GitHub repository URL
         id: validate_url
+        if: needs.extract-issue-details.outputs.error_message == ''
         run: |
-          python3 .github/scripts/validate_repo_url.py "${{ needs.extract-issue-details.outputs.url }}" new-submission
+          if ! python3 .github/scripts/validate_repo_url.py "${{ needs.extract-issue-details.outputs.url }}" new-submission 2>&1 | tee /tmp/validate_error.txt; then
+            ERROR_MSG=$(grep -oP '(?<=::error::).*' /tmp/validate_error.txt || echo "Invalid GitHub repository URL format")
+            echo "error_message=$ERROR_MSG" >> $GITHUB_OUTPUT
+            exit 1
+          fi
 
       - name: Verify repository exists and is not a fork
         id: validate_repo
@@ -315,7 +320,12 @@ jobs:
       - name: Validate pull request URL
         id: validate_pr
         if: needs.extract-issue-details.outputs.error_message == ''
-        run: python3 .github/scripts/validate_repo_url.py "${{ needs.extract-issue-details.outputs.url }}"
+        run: |
+          if ! python3 .github/scripts/validate_repo_url.py "${{ needs.extract-issue-details.outputs.url }}" 2>&1 | tee /tmp/validate_error.txt; then
+            ERROR_MSG=$(grep -oP '(?<=::error::).*' /tmp/validate_error.txt || echo "Invalid pull request URL format")
+            echo "error_message=$ERROR_MSG" >> $GITHUB_OUTPUT
+            exit 1
+          fi
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
