@@ -110,10 +110,14 @@ tests = [
         'expect_success': True
     },
     {
-        'name': 'Invalid PR - missing protocol',
+        'name': 'Valid PR URL without protocol',
         'args': ['github.com/owner/repo/pull/123'],
-        'expect_success': False,
-        'expected_error': 'Invalid GitHub PR URL'
+        'expect_success': True
+    },
+    {
+        'name': 'Valid PR URL without protocol with trailing slash',
+        'args': ['github.com/owner/repo/pull/123/'],
+        'expect_success': True
     },
     {
         'name': 'Invalid PR - wrong path',

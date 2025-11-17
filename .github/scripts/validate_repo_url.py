@@ -14,7 +14,7 @@ if __name__ == '__main__':
     url_regex = (
         r'^(?:https://)?(?:www\.)?github\.com/([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?)\/([a-zA-Z0-9_.-]{1,100})\/?$'
         if is_new else
-        r'^https://github\.com/[a-zA-Z0-9_.-]{1,100}/[a-zA-Z0-9_.-]{1,100}/pull/\d+\/?$'
+        r'^(?:https://)?(?:www\.)?github\.com/[a-zA-Z0-9_.-]{1,100}/[a-zA-Z0-9_.-]{1,100}/pull/\d+\/?$'
     )
 
     if not url:
