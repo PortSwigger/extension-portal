@@ -8,7 +8,7 @@ on:
         required: true
         type: number
       comment_body:
-        description: 'Comment body (markdown supported)'
+        description: 'Base64-encoded comment body (markdown supported)'
         required: true
         type: string
 
@@ -26,7 +26,10 @@ jobs:
         with:
           script: |
             const issueNumber = parseInt(process.env.ISSUE_NUMBER);
-            const body = process.env.COMMENT_BODY;
+            const encodedBody = process.env.COMMENT_BODY;
+
+            // Decode base64 comment body
+            const body = Buffer.from(encodedBody, 'base64').toString('utf-8');
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,

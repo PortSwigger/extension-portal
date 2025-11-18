@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       payload:
-        description: 'JSON payload to send to Zoom webhook'
+        description: 'Base64-encoded JSON payload to send to Zoom webhook'
         required: true
         type: string
     secrets:
@@ -26,7 +26,12 @@ jobs:
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
-            const payload = JSON.parse(process.env.PAYLOAD);
+            const encodedPayload = process.env.PAYLOAD;
+
+            // Decode base64 payload
+            const payloadString = Buffer.from(encodedPayload, 'base64').toString('utf-8');
+            const payload = JSON.parse(payloadString);
+
             const webhookUrl = `${process.env.ZOOM_WEBHOOK_URL}?format=fields`;
 
             const response = await fetch(webhookUrl, {

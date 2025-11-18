@@ -213,15 +213,21 @@ jobs:
         with:
           script: |
             const extractError = process.env.EXTRACT_ERROR || '';
-
-            const validateUrlOutcome = process.env.VALIDATE_URL_OUTCOME || '';
+            const validateUrlOutcome = process.env.VALIDATE_URL_OUTCOME || 'skipped';
             const validateUrlError = process.env.VALIDATE_URL_ERROR || '';
-
-            const validateRepoOutcome = process.env.VALIDATE_REPO_OUTCOME || '';
+            const validateRepoOutcome = process.env.VALIDATE_REPO_OUTCOME || 'skipped';
             const validateRepoError = process.env.VALIDATE_REPO_ERROR || '';
+            const createJiraOutcome = process.env.CREATE_JIRA_OUTCOME || 'skipped';
+
+            core.info(`Extract error: "${extractError}"`);
+            core.info(`Validate URL outcome: "${validateUrlOutcome}"`);
+            core.info(`Validate repo outcome: "${validateRepoOutcome}"`);
+            core.info(`Create Jira outcome: "${createJiraOutcome}"`);
 
             // Job is successful if there are no errors and all outcomes are success
-            const jobSuccess = !extractError && validateUrlOutcome === 'success' && validateRepoOutcome === 'success';
+            const jobSuccess = !extractError && validateUrlOutcome === 'success' && validateRepoOutcome === 'success' && createJiraOutcome === 'success';
+
+            core.info(`Job success: ${jobSuccess}`);
 
             let message;
             let shouldClose = false;
@@ -247,6 +253,10 @@ jobs:
                 specificError = validateRepoError || 'Repository validation failed. The repository may be a fork or not accessible.';
               }
 
+              if (!specificError && createJiraOutcome === 'failure') {
+                specificError = 'Failed to create ticket. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance.';
+              }
+
               message = specificError
                 ? [
                     '❌ Submission failed.',
@@ -263,16 +273,26 @@ jobs:
               shouldClose = true;
             }
 
-            // Use a marker to prevent GitHub from masking the output
-            core.setOutput('comment_body', message);
+            core.info(`Message length: ${message ? message.length : 'undefined'}`);
+            core.info(`Message preview: ${message ? message.substring(0, 50) : 'undefined'}`);
+            core.info(`Should close: ${shouldClose}`);
+            core.info(`Setting comment_body output now...`);
+
+            // Base64 encode to prevent GitHub from masking the output
+            const encodedMessage = Buffer.from(message).toString('base64');
+            core.setOutput('comment_body', encodedMessage);
             core.setOutput('should_close', shouldClose.toString());
             core.setOutput('has_comment', 'true');
+
+            core.info(`Output set. Verifying...`);
+            core.info(`Final message type: ${typeof message}`);
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
           VALIDATE_URL_OUTCOME: ${{ steps.validate_url.outcome }}
           VALIDATE_URL_ERROR: ${{ steps.validate_url.outputs.error_message || '' }}
           VALIDATE_REPO_OUTCOME: ${{ steps.validate_repo.outcome }}
           VALIDATE_REPO_ERROR: ${{ steps.validate_repo.outputs.error_message || '' }}
+          CREATE_JIRA_OUTCOME: ${{ steps.create_jira.outcome }}
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
@@ -290,7 +310,9 @@ jobs:
               "Issue": issueUrl
             };
 
-            core.setOutput('payload', JSON.stringify(payload));
+            // Base64 encode to prevent GitHub from masking the output
+            const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64');
+            core.setOutput('payload', encodedPayload);
         env:
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
           JIRA_URL: ${{ steps.create_jira.outputs.jira_url }}
@@ -342,7 +364,9 @@ jobs:
               "Action": "⚠️ Create associated update ticket."
             };
 
-            core.setOutput('payload', JSON.stringify(payload));
+            // Base64 encode to prevent GitHub from masking the output
+            const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64');
+            core.setOutput('payload', encodedPayload);
         env:
           URL: ${{ needs.extract-issue-details.outputs.url }}
           VERSION_NUMBER: ${{ needs.extract-issue-details.outputs.version_number }}
@@ -391,8 +415,9 @@ jobs:
               shouldClose = true;
             }
 
-            // Use a marker to prevent GitHub from masking the output
-            core.setOutput('comment_body', message);
+            // Base64 encode to prevent GitHub from masking the output
+            const encodedMessage = Buffer.from(message).toString('base64');
+            core.setOutput('comment_body', encodedMessage);
             core.setOutput('should_close', shouldClose.toString());
             core.setOutput('has_comment', 'true');
         env:
