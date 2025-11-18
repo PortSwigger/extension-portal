@@ -124,45 +124,20 @@ jobs:
       - name: Verify repository exists and is not a fork
         id: validate_repo
         if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_url.conclusion == 'success'
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          script: |
-            try {
-              const url = process.env.URL;
+        continue-on-error: true
+        run: |
+          if ! OUTPUT=$(python3 .github/scripts/validate_repo.py 2>&1 | tee /tmp/validate_repo_output.txt); then
+            ERROR_MSG=$(grep -oP '(?<=::error::).*' /tmp/validate_repo_output.txt || echo "Repository validation failed")
+            echo "error_message=$ERROR_MSG" >> $GITHUB_OUTPUT
+            exit 1
+          fi
 
-              // Extract owner and repo from URL
-              const match = url.match(/(?:https:\/\/)?(?:www\.)?github\.com\/([^\/]+)\/([^\/]+)/);
-              if (!match) {
-                throw new Error(`Could not extract owner/repo from URL: ${url}`);
-              }
-
-              const owner = match[1];
-              const repo = match[2].replace(/\/$/, ''); // Remove trailing slash
-              const normalizedUrl = `https://github.com/${owner}/${repo}`;
-
-              const response = await github.rest.repos.get({ owner, repo });
-
-              if (response.data.fork) {
-                throw new Error(
-                  `Repository ${owner}/${repo} is a fork. ` +
-                  `Extensions must be original work, not derivatives of other repositories. ` +
-                  `Please submit the original repository instead.`
-                );
-              }
-
-              core.setOutput('normalized_url', normalizedUrl);
-              core.debug(`Validated repository: ${owner}/${repo}`);
-            } catch (error) {
-              if (error.status === 404) {
-                const match = process.env.URL.match(/github\.com\/([^\/]+)\/([^\/]+)/);
-                const repo_name = match ? `${match[1]}/${match[2].replace(/\/$/, '')}` : 'unknown';
-                throw new Error(`GitHub repository not found: ${repo_name}`);
-              }
-              core.setOutput('error_message', error.message);
-              throw error;
-            }
+          # Extract normalized_url from script output
+          NORMALIZED_URL=$(grep -oP '(?<=normalized_url=).*' /tmp/validate_repo_output.txt)
+          echo "normalized_url=$NORMALIZED_URL" >> $GITHUB_OUTPUT
         env:
           URL: ${{ needs.extract-issue-details.outputs.url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Jira ticket
         id: create_jira
