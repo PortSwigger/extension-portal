@@ -216,6 +216,10 @@ jobs:
             const validateUrlError = process.env.VALIDATE_URL_ERROR || '';
             const validateRepoError = process.env.VALIDATE_REPO_ERROR || '';
 
+            core.info(`Extract error: "${extractError}"`);
+            core.info(`Validate URL error: "${validateUrlError}"`);
+            core.info(`Validate repo error: "${validateRepoError}"`);
+
             // Job is successful if there are no errors
             const jobSuccess = !extractError && !validateUrlError && !validateRepoError;
 
