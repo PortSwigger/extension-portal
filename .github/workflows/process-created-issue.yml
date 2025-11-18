@@ -123,7 +123,7 @@ jobs:
 
       - name: Verify repository exists and is not a fork
         id: validate_repo
-        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_url.conclusion == 'success'
+        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_url.outcome == 'success'
         continue-on-error: true
         run: |
           if ! OUTPUT=$(python3 .github/scripts/validate_repo.py 2>&1 | tee /tmp/validate_repo_output.txt); then
@@ -141,7 +141,7 @@ jobs:
 
       - name: Create Jira ticket
         id: create_jira
-        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_url.conclusion == 'success' && steps.validate_repo.conclusion == 'success'
+        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_url.outcome == 'success' && steps.validate_repo.outcome == 'success'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -261,7 +261,7 @@ jobs:
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
-        if: steps.validate_url.conclusion == 'success' && steps.validate_repo.conclusion == 'success' && steps.create_jira.conclusion == 'success'
+        if: steps.validate_url.outcome == 'success' && steps.validate_repo.outcome == 'success' && steps.create_jira.outcome == 'success'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -310,7 +310,7 @@ jobs:
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
-        if: steps.validate_pr.conclusion == 'success'
+        if: steps.validate_pr.outcome == 'success'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
