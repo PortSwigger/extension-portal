@@ -92,25 +92,12 @@ jobs:
                 }
               `, { issueId: issue.node_id });
 
-              core.info(`GraphQL result: ${JSON.stringify(result, null, 2)}`);
-
               const node = result.node;
-
-              // Debug: Log all project items
-              core.info(`Found ${node.projectItems.nodes.length} project items`);
-              node.projectItems.nodes.forEach((item, idx) => {
-                core.info(`Project ${idx}: number=${item.project?.number}, isArchived=${item.isArchived}`);
-              });
 
               // Find the project item for project #1
               const projectItem = node.projectItems.nodes.find(
                 item => item.project.number === 1
               );
-
-              core.info(`Project item for project #1: ${projectItem ? 'found' : 'not found'}`);
-              if (projectItem) {
-                core.info(`Project item isArchived: ${projectItem.isArchived}`);
-              }
 
               // If not found on project board OR explicitly archived, treat as archived
               const isArchived = !projectItem || projectItem.isArchived;
