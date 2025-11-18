@@ -64,11 +64,11 @@ jobs:
               });
 
               // Query project items for this issue
-              const { node } = await github.graphql(`
+              const result = await github.graphql(`
                 query($issueId: ID!) {
                   node(id: $issueId) {
                     ... on Issue {
-                      projectItems(first: 10, includeArchived: true) {
+                      projectItems(first: 10) {
                         nodes {
                           isArchived
                           project {
@@ -82,6 +82,10 @@ jobs:
                   }
                 }
               `, { issueId: issue.node_id });
+
+              core.info(`GraphQL result: ${JSON.stringify(result, null, 2)}`);
+
+              const node = result.node;
 
               // Debug: Log all project items
               core.info(`Found ${node.projectItems.nodes.length} project items`);
