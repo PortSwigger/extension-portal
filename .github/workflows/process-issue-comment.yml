@@ -24,8 +24,8 @@ jobs:
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          # Truncate to first 10 characters and trim whitespace
-          COMMENT_PREFIX=$(echo "$COMMENT_BODY" | cut -c1-10 | xargs)
+          # Truncate to first 10 characters
+          COMMENT_PREFIX="${COMMENT_BODY:0:10}"
 
           if [[ "$COMMENT_PREFIX" == "/reopen"* ]]; then
             echo "is_reopen_request=true" >> $GITHUB_OUTPUT
