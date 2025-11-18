@@ -127,7 +127,10 @@ jobs:
         continue-on-error: true
         run: |
           if ! OUTPUT=$(python3 .github/scripts/validate_repo.py 2>&1 | tee /tmp/validate_repo_output.txt); then
+            echo "Script failed, extracting error message..."
+            cat /tmp/validate_repo_output.txt
             ERROR_MSG=$(grep -oP '(?<=::error::).*' /tmp/validate_repo_output.txt || echo "Repository validation failed")
+            echo "Extracted error: $ERROR_MSG"
             echo "error_message=$ERROR_MSG" >> $GITHUB_OUTPUT
             exit 1
           fi
@@ -213,15 +216,19 @@ jobs:
         with:
           script: |
             const extractError = process.env.EXTRACT_ERROR || '';
+            const validateUrlOutcome = process.env.VALIDATE_URL_OUTCOME || '';
+            const validateRepoOutcome = process.env.VALIDATE_REPO_OUTCOME || '';
             const validateUrlError = process.env.VALIDATE_URL_ERROR || '';
             const validateRepoError = process.env.VALIDATE_REPO_ERROR || '';
 
             core.info(`Extract error: "${extractError}"`);
+            core.info(`Validate URL outcome: "${validateUrlOutcome}"`);
             core.info(`Validate URL error: "${validateUrlError}"`);
+            core.info(`Validate repo outcome: "${validateRepoOutcome}"`);
             core.info(`Validate repo error: "${validateRepoError}"`);
 
-            // Job is successful if there are no errors
-            const jobSuccess = !extractError && !validateUrlError && !validateRepoError;
+            // Job is successful if there are no errors and all outcomes are success
+            const jobSuccess = !extractError && validateUrlOutcome === 'success' && validateRepoOutcome === 'success';
 
             let message;
             let shouldClose = false;
@@ -260,7 +267,9 @@ jobs:
             core.setOutput('has_comment', 'true');
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
+          VALIDATE_URL_OUTCOME: ${{ steps.validate_url.outcome }}
           VALIDATE_URL_ERROR: ${{ steps.validate_url.outputs.error_message || '' }}
+          VALIDATE_REPO_OUTCOME: ${{ steps.validate_repo.outcome }}
           VALIDATE_REPO_ERROR: ${{ steps.validate_repo.outputs.error_message || '' }}
 
       - name: Prepare Zoom notification payload
