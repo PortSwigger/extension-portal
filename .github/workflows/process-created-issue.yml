@@ -104,6 +104,7 @@ jobs:
       zoom_payload: ${{ steps.prepare_zoom.outputs.payload }}
       comment_body: ${{ steps.prepare_comment.outputs.comment_body }}
       should_close: ${{ steps.prepare_comment.outputs.should_close }}
+      has_comment: ${{ steps.prepare_comment.outputs.has_comment }}
 
     steps:
       - name: Checkout repository
@@ -112,6 +113,7 @@ jobs:
       - name: Validate GitHub repository URL
         id: validate_url
         if: needs.extract-issue-details.outputs.error_message == ''
+        continue-on-error: true
         run: |
           if ! python3 .github/scripts/validate_repo_url.py "${{ needs.extract-issue-details.outputs.url }}" new-submission 2>&1 | tee /tmp/validate_error.txt; then
             ERROR_MSG=$(grep -oP '(?<=::error::).*' /tmp/validate_error.txt || echo "Invalid GitHub repository URL format")
@@ -121,7 +123,7 @@ jobs:
 
       - name: Verify repository exists and is not a fork
         id: validate_repo
-        if: needs.extract-issue-details.outputs.error_message == ''
+        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_url.conclusion == 'success'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -273,8 +275,10 @@ jobs:
               shouldClose = true;
             }
 
+            // Use a marker to prevent GitHub from masking the output
             core.setOutput('comment_body', message);
             core.setOutput('should_close', shouldClose.toString());
+            core.setOutput('has_comment', 'true');
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
           VALIDATE_URL_ERROR: ${{ steps.validate_url.outputs.error_message || '' }}
@@ -282,7 +286,7 @@ jobs:
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
-        if: success()
+        if: steps.validate_url.conclusion == 'success' && steps.validate_repo.conclusion == 'success' && steps.create_jira.conclusion == 'success'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -312,6 +316,7 @@ jobs:
       zoom_payload: ${{ steps.prepare_zoom.outputs.payload }}
       comment_body: ${{ steps.prepare_comment.outputs.comment_body }}
       should_close: ${{ steps.prepare_comment.outputs.should_close }}
+      has_comment: ${{ steps.prepare_comment.outputs.has_comment }}
 
     steps:
       - name: Checkout repository
@@ -320,6 +325,7 @@ jobs:
       - name: Validate pull request URL
         id: validate_pr
         if: needs.extract-issue-details.outputs.error_message == ''
+        continue-on-error: true
         run: |
           if ! python3 .github/scripts/validate_repo_url.py "${{ needs.extract-issue-details.outputs.url }}" 2>&1 | tee /tmp/validate_error.txt; then
             ERROR_MSG=$(grep -oP '(?<=::error::).*' /tmp/validate_error.txt || echo "Invalid pull request URL format")
@@ -329,7 +335,7 @@ jobs:
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
-        if: success()
+        if: steps.validate_pr.conclusion == 'success'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -395,8 +401,10 @@ jobs:
               shouldClose = true;
             }
 
+            // Use a marker to prevent GitHub from masking the output
             core.setOutput('comment_body', message);
             core.setOutput('should_close', shouldClose.toString());
+            core.setOutput('has_comment', 'true');
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
           VALIDATE_ERROR: ${{ steps.validate_pr.outputs.error_message }}
@@ -405,8 +413,8 @@ jobs:
     needs: [extract-issue-details, submit-extension, submit-update]
     if: |
       always() &&
-      (needs.submit-extension.outputs.comment_body != '' ||
-       needs.submit-update.outputs.comment_body != '')
+      (needs.submit-extension.outputs.has_comment == 'true' ||
+       needs.submit-update.outputs.has_comment == 'true')
     uses: ./.github/workflows/common-post-issue-comment.yml
     with:
       issue_number: ${{ github.event.issue.number }}
