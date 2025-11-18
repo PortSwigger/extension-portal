@@ -66,12 +66,6 @@ jobs:
             const ARCHIVED_MESSAGE = '⚠️ This issue appears to be archived and has been removed from the project board.\n\nOur team has been notified and will manually restore it before reopening.\n\nPlease allow some time for this to be processed.';
 
             try {
-              const { data: issue } = await github.rest.issues.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number
-              });
-
               // Query project items for this issue
               const result = await github.graphql(`
                 query($issueId: ID!) {
@@ -90,7 +84,7 @@ jobs:
                     }
                   }
                 }
-              `, { issueId: issue.node_id });
+              `, { issueId: context.payload.issue.node_id });
 
               const node = result.node;
 
