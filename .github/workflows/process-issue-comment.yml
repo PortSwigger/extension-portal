@@ -15,8 +15,8 @@ jobs:
     outputs:
       zoom_payload: ${{ steps.prepare_payload.outputs.payload }}
       should_notify: ${{ steps.prepare_payload.outputs.should_notify }}
-      comment_body: ${{ steps.check_archived.outputs.comment || steps.check_creator.outputs.comment }}
-      should_post_comment: ${{ steps.check_archived.outputs.comment != '' || steps.check_creator.outputs.comment != '' }}
+      comment_body: ${{ steps.check_archived.outputs.comment || '' }}
+      should_post_comment: ${{ steps.check_archived.outputs.comment != '' }}
 
     steps:
       - name: Check if comment is a reopen request
@@ -33,24 +33,24 @@ jobs:
             echo "is_reopen_request=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check if commenter is issue creator
-        id: check_creator
-        if: steps.check_comment.outputs.is_reopen_request == 'true'
-        run: |
-          ISSUE_CREATOR="${{ github.event.issue.user.login }}"
-          COMMENTER="${{ github.event.comment.user.login }}"
-
-          if [[ "$ISSUE_CREATOR" == "$COMMENTER" ]]; then
-            echo "is_creator=true" >> $GITHUB_OUTPUT
-          else
-            echo "is_creator=false" >> $GITHUB_OUTPUT
-            # Set non-creator comment
-            echo "comment=⚠️ Only the original issue creator can reopen this issue using the \`/reopen\` command. Please ask a maintainer for assistance or create a new issue if needed." >> $GITHUB_OUTPUT
-          fi
+      # - name: Check if commenter is issue creator
+      #   id: check_creator
+      #   if: steps.check_comment.outputs.is_reopen_request == 'true'
+      #   run: |
+      #     ISSUE_CREATOR="${{ github.event.issue.user.login }}"
+      #     COMMENTER="${{ github.event.comment.user.login }}"
+      #
+      #     if [[ "$ISSUE_CREATOR" == "$COMMENTER" ]]; then
+      #       echo "is_creator=true" >> $GITHUB_OUTPUT
+      #     else
+      #       echo "is_creator=false" >> $GITHUB_OUTPUT
+      #       # Set non-creator comment
+      #       echo "comment=⚠️ Only the original issue creator can reopen this issue using the \`/reopen\` command. Please ask a maintainer for assistance or create a new issue if needed." >> $GITHUB_OUTPUT
+      #     fi
 
       - name: Check if issue is archived
         id: check_archived
-        if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_creator.outputs.is_creator == 'true'
+        if: steps.check_comment.outputs.is_reopen_request == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -109,7 +109,7 @@ jobs:
 
       - name: Prepare Zoom notification payload
         id: prepare_payload
-        if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_creator.outputs.is_creator == 'true' && steps.check_archived.outputs.is_archived == 'true'
+        if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_archived.outputs.is_archived == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -130,7 +130,7 @@ jobs:
             core.setOutput('should_notify', 'true');
 
       - name: Reopen issue
-        if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_creator.outputs.is_creator == 'true' && steps.check_archived.outputs.is_archived != 'true'
+        if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_archived.outputs.is_archived != 'true'
         uses: actions/github-script@v7
         with:
           script: |
