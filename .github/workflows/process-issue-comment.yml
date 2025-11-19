@@ -103,7 +103,9 @@ jobs:
                   ? 'Issue not found on project board'
                   : 'Issue is archived on project board';
                 core.info(reason);
-                core.setOutput('comment', ARCHIVED_MESSAGE);
+
+                const encodedMessage = Buffer.from(ARCHIVED_MESSAGE).toString('base64');
+                core.setOutput('comment', encodedMessage);
               } else {
                 core.info('Issue is on the project board and not archived');
               }
@@ -131,7 +133,8 @@ jobs:
               "URL": issueUrl
             };
 
-            core.setOutput('payload', JSON.stringify(payload));
+            const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64');
+            core.setOutput('payload', encodedPayload);
             core.setOutput('should_notify', 'true');
 
       - name: Reopen issue
