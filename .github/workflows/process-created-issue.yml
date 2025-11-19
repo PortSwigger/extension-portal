@@ -115,26 +115,14 @@ jobs:
         if: needs.extract-issue-details.outputs.error_message == ''
         continue-on-error: true
         run: |
-          if ! python3 .github/scripts/validate_repo_url.py "${{ needs.extract-issue-details.outputs.url }}" new-submission 2>&1 | tee /tmp/validate_error.txt; then
-            ERROR_MSG=$(grep -oP '(?<=::error::).*' /tmp/validate_error.txt || echo "Invalid GitHub repository URL format")
-            echo "error_message=$ERROR_MSG" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+          python3 .github/scripts/validate_repo_url.py "${{ needs.extract-issue-details.outputs.url }}" new-submission
 
       - name: Verify repository exists and is not a fork
         id: validate_repo
         if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_url.outcome == 'success'
         continue-on-error: true
         run: |
-          if ! OUTPUT=$(python3 .github/scripts/validate_repo.py 2>&1 | tee /tmp/validate_repo_output.txt); then
-            ERROR_MSG=$(grep -oP '(?<=::error::).*' /tmp/validate_repo_output.txt || echo "Repository validation failed")
-            echo "error_message=$ERROR_MSG" >> $GITHUB_OUTPUT
-            exit 1
-          fi
-
-          # Extract normalized_url from script output
-          NORMALIZED_URL=$(grep -oP '(?<=normalized_url=).*' /tmp/validate_repo_output.txt)
-          echo "normalized_url=$NORMALIZED_URL" >> $GITHUB_OUTPUT
+          python3 .github/scripts/validate_repo.py
         env:
           URL: ${{ needs.extract-issue-details.outputs.url }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -296,7 +284,7 @@ jobs:
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
-        if: steps.validate_url.outcome == 'success' && steps.validate_repo.outcome == 'success' && steps.create_jira.outcome == 'success'
+        if: steps.validate_url.outcome == 'success' && steps.validate_repo.outcome == 'success'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -306,7 +294,7 @@ jobs:
 
             const payload = {
               "Extension": title,
-              "Jira Ticket": jiraUrl || 'Not created',
+              "Jira Ticket": jiraUrl || '❌ Not created',
               "Issue": issueUrl
             };
 
@@ -339,11 +327,7 @@ jobs:
         if: needs.extract-issue-details.outputs.error_message == ''
         continue-on-error: true
         run: |
-          if ! python3 .github/scripts/validate_repo_url.py "${{ needs.extract-issue-details.outputs.url }}" 2>&1 | tee /tmp/validate_error.txt; then
-            ERROR_MSG=$(grep -oP '(?<=::error::).*' /tmp/validate_error.txt || echo "Invalid pull request URL format")
-            echo "error_message=$ERROR_MSG" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+          python3 .github/scripts/validate_repo_url.py "${{ needs.extract-issue-details.outputs.url }}"
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom

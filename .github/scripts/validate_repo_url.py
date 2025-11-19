@@ -6,6 +6,7 @@ Validates GitHub repository URLs
 
 import sys
 import re
+from github_actions_utils import set_output
 
 if __name__ == '__main__':
     url = sys.argv[1] if len(sys.argv) > 1 else None
@@ -18,18 +19,23 @@ if __name__ == '__main__':
     )
 
     if not url:
-        print('::error::URL is required', file=sys.stderr)
+        error_msg = 'URL is required'
+        print(f'::error::{error_msg}', file=sys.stderr)
+        set_output('error_message', error_msg)
         sys.exit(1)
 
     if len(url) > 500:
-        print('::error::URL exceeds maximum length of 500 characters', file=sys.stderr)
+        error_msg = 'URL exceeds maximum length of 500 characters'
+        print(f'::error::{error_msg}', file=sys.stderr)
+        set_output('error_message', error_msg)
         sys.exit(1)
 
     if not re.match(url_regex, url):
-        error = (
-            f'::error::Invalid GitHub URL: "{url}". Expected format: https://github.com/owner/repo'
+        error_msg = (
+            f'Invalid GitHub URL: "{url}". Expected format: https://github.com/owner/repo'
             if is_new else
-            f'::error::Invalid GitHub PR URL format: "{url}". Expected: https://github.com/owner/repo/pull/123'
+            f'Invalid GitHub PR URL format: "{url}". Expected: https://github.com/owner/repo/pull/123'
         )
-        print(error, file=sys.stderr)
+        print(f'::error::{error_msg}', file=sys.stderr)
+        set_output('error_message', error_msg)
         sys.exit(1)

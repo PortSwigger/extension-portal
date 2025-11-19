@@ -9,6 +9,7 @@ import os
 import re
 import json
 from urllib import request, error
+from github_actions_utils import set_output
 
 def extract_owner_repo(url):
     """Extract owner and repo from GitHub URL"""
@@ -21,7 +22,15 @@ def extract_owner_repo(url):
     return owner, repo
 
 def validate_repo(url, github_token=None):
-    """Validate that the repository exists and is not a fork"""
+    """
+    Validate that the repository exists and is not a fork.
+
+    Returns:
+        str: The normalized GitHub URL (https://github.com/owner/repo)
+
+    Raises:
+        ValueError: If the repository is invalid, doesn't exist, or is a fork
+    """
     try:
         owner, repo = extract_owner_repo(url)
         normalized_url = f"https://github.com/{owner}/{repo}"
@@ -43,8 +52,7 @@ def validate_repo(url, github_token=None):
                     f"Please submit the original repository instead."
                 )
 
-        # Output normalized URL for GitHub Actions
-        print(f"normalized_url={normalized_url}")
+        return normalized_url
 
     except error.HTTPError as e:
         if e.code == 404:
@@ -58,11 +66,16 @@ if __name__ == '__main__':
     github_token = os.environ.get('GITHUB_TOKEN')  # Optional
 
     if not url:
-        print('::error::URL environment variable is required', file=sys.stderr)
+        error_msg = 'URL environment variable is required'
+        print(f'::error::{error_msg}', file=sys.stderr)
+        set_output('error_message', error_msg)
         sys.exit(1)
 
     try:
-        validate_repo(url, github_token)
+        normalized_url = validate_repo(url, github_token)
+        set_output('normalized_url', normalized_url)
     except Exception as e:
-        print(f'::error::{str(e)}', file=sys.stderr)
+        error_msg = str(e)
+        print(f'::error::{error_msg}', file=sys.stderr)
+        set_output('error_message', error_msg)
         sys.exit(1)
