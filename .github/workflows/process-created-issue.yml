@@ -145,7 +145,7 @@ jobs:
               headers: jiraHeaders,
               body: JSON.stringify({
                 fields: {
-                  project: { key: process.env.JIRA_PROJECT_KEY },
+                  project: { key: "BAPP" },
                   summary: title,
                   issuetype: { id: "10278" },
                   customfield_10932: process.env.NORMALIZED_URL,
@@ -190,7 +190,6 @@ jobs:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-          JIRA_PROJECT_KEY: ${{ secrets.JIRA_PROJECT_KEY }}
           NORMALIZED_URL: ${{ steps.validate_repo.outputs.normalized_url }}
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
 
