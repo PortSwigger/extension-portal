@@ -7,10 +7,15 @@ on:
         description: 'Issue number to comment on'
         required: true
         type: number
-      comment_body:
-        description: 'Base64-encoded comment body (markdown supported)'
+      template_key:
+        description: 'Template key (e.g., "extension-submission.success")'
         required: true
         type: string
+      error_message:
+        description: 'Error message for template substitution'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   issues: write
@@ -19,26 +24,46 @@ jobs:
   post-comment:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      TEMPLATE_FILE_PATH: .github/resources/comment-templates.yml
 
     steps:
+      - name: Checkout comment templates
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: ${{ env.TEMPLATE_FILE_PATH }}
+          sparse-checkout-cone-mode: false
+
       - name: Post comment to issue
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
-            const issueNumber = parseInt(process.env.ISSUE_NUMBER);
-            const encodedBody = process.env.COMMENT_BODY;
+            const fs = require('fs');
+            const yaml = require('js-yaml');
 
-            // Decode base64 comment body
-            const body = Buffer.from(encodedBody, 'base64').toString('utf-8');
+            // Load and parse template
+            const templates = yaml.load(fs.readFileSync(process.env.TEMPLATE_FILE_PATH, 'utf8'));
+            const [category, type] = process.env.TEMPLATE_KEY.split('.');
 
+            // Render template with variable substitution
+            const body = templates[category]?.[type]?.replace(/\{\{(\w+)\}\}/g, (_, key) =>
+              process.env[key] || ''
+            );
+
+            if (!body) {
+              throw new Error(`Template not found: ${process.env.TEMPLATE_KEY}`);
+            }
+
+            // Post comment
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: issueNumber,
-              body: body
+              issue_number: parseInt(process.env.ISSUE_NUMBER),
+              body: body.trim()
             });
 
-            core.info(`Posted comment to issue #${issueNumber}`);
+            core.info(`Posted comment to issue #${process.env.ISSUE_NUMBER} using template: ${process.env.TEMPLATE_KEY}`);
         env:
           ISSUE_NUMBER: ${{ inputs.issue_number }}
-          COMMENT_BODY: ${{ inputs.comment_body }}
+          TEMPLATE_KEY: ${{ inputs.template_key }}
+          ERROR_MESSAGE: ${{ inputs.error_message }}

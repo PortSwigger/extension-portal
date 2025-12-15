@@ -15,8 +15,8 @@ jobs:
     outputs:
       zoom_payload: ${{ steps.prepare_payload.outputs.payload }}
       should_notify: ${{ steps.prepare_payload.outputs.should_notify }}
-      comment_body: ${{ steps.check_archived.outputs.comment || '' }}
-      should_post_comment: ${{ steps.check_archived.outputs.comment != '' }}
+      template_key: ${{ steps.check_archived.outputs.template_key || '' }}
+      should_post_comment: ${{ steps.check_archived.outputs.template_key != '' }}
 
     steps:
       - name: Check if comment is a reopen request
@@ -63,8 +63,6 @@ jobs:
         with:
           github-token: ${{ steps.generate_token.outputs.token }}
           script: |
-            const ARCHIVED_MESSAGE = '⚠️ This issue appears to be archived and has been removed from the project board.\n\nOur team has been notified and will manually restore it before reopening.\n\nPlease allow some time for this to be processed.';
-
             try {
               // Query project items for this issue
               const result = await github.graphql(`
@@ -104,8 +102,7 @@ jobs:
                   : 'Issue is archived on project board';
                 core.info(reason);
 
-                const encodedMessage = Buffer.from(ARCHIVED_MESSAGE).toString('base64');
-                core.setOutput('comment', encodedMessage);
+                core.setOutput('template_key', 'reopen-issue.archived');
               } else {
                 core.info('Issue is on the project board and not archived');
               }
@@ -167,4 +164,4 @@ jobs:
     uses: ./.github/workflows/common-post-issue-comment.yml
     with:
       issue_number: ${{ github.event.issue.number }}
-      comment_body: ${{ needs.reopen-issue.outputs.comment_body }}
+      template_key: ${{ needs.reopen-issue.outputs.template_key }}

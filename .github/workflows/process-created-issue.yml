@@ -102,7 +102,8 @@ jobs:
     timeout-minutes: 10
     outputs:
       zoom_payload: ${{ steps.prepare_zoom.outputs.payload }}
-      comment_body: ${{ steps.prepare_comment.outputs.comment_body }}
+      template_key: ${{ steps.prepare_comment.outputs.template_key }}
+      error_message: ${{ steps.prepare_comment.outputs.error_message }}
       should_close: ${{ steps.prepare_comment.outputs.should_close }}
       has_comment: ${{ steps.prepare_comment.outputs.has_comment }}
 
@@ -216,19 +217,12 @@ jobs:
 
             core.info(`Job success: ${jobSuccess}`);
 
-            let message;
+            let templateKey;
+            let errorMessage = '';
             let shouldClose = false;
 
             if (jobSuccess) {
-              message = [
-                'Thank you for your BApp Store extension submission!',
-                '',
-                'Your submission has been added to our review queue.',
-                '',
-                'We will review your extension as soon as possible. You can track the progress of your submission in our [Extension submissions](https://github.com/orgs/PortSwigger/projects/1) project.',
-                '',
-                'If you have any questions, please comment on this issue. For urgent matters, contact [bapps@portswigger.net](mailto:bapps@portswigger.net). We do not respond to status update requests via email.'
-              ].join('\n');
+              templateKey = 'extension-submission.success';
             } else {
               let specificError = extractError;
 
@@ -244,35 +238,21 @@ jobs:
                 specificError = 'Failed to create ticket. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance.';
               }
 
-              message = specificError
-                ? [
-                    '❌ Submission failed.',
-                    '',
-                    `**Error:** ${specificError}`,
-                    '',
-                    'Please correct the issue and submit a new request.'
-                  ].join('\n')
-                : [
-                    '❌ Submission failed.',
-                    '',
-                    'Your submission could not be processed. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance.'
-                  ].join('\n');
+              templateKey = specificError
+                ? 'extension-submission.failure-specific'
+                : 'extension-submission.failure-generic';
+              errorMessage = specificError || '';
               shouldClose = true;
             }
 
-            core.info(`Message length: ${message ? message.length : 'undefined'}`);
-            core.info(`Message preview: ${message ? message.substring(0, 50) : 'undefined'}`);
+            core.info(`Template key: ${templateKey}`);
+            core.info(`Error message: ${errorMessage}`);
             core.info(`Should close: ${shouldClose}`);
-            core.info(`Setting comment_body output now...`);
 
-            // Base64 encode to prevent GitHub from masking the output
-            const encodedMessage = Buffer.from(message).toString('base64');
-            core.setOutput('comment_body', encodedMessage);
+            core.setOutput('template_key', templateKey);
+            core.setOutput('error_message', errorMessage);
             core.setOutput('should_close', shouldClose.toString());
             core.setOutput('has_comment', 'true');
-
-            core.info(`Output set. Verifying...`);
-            core.info(`Final message type: ${typeof message}`);
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
           VALIDATE_URL_OUTCOME: ${{ steps.validate_url.outcome }}
@@ -313,7 +293,8 @@ jobs:
     timeout-minutes: 10
     outputs:
       zoom_payload: ${{ steps.prepare_zoom.outputs.payload }}
-      comment_body: ${{ steps.prepare_comment.outputs.comment_body }}
+      template_key: ${{ steps.prepare_comment.outputs.template_key }}
+      error_message: ${{ steps.prepare_comment.outputs.error_message }}
       should_close: ${{ steps.prepare_comment.outputs.should_close }}
       has_comment: ${{ steps.prepare_comment.outputs.has_comment }}
 
@@ -367,40 +348,27 @@ jobs:
             // Job is successful if there are no errors
             const jobSuccess = !extractError && !validateError;
 
-            let message;
+            let templateKey;
+            let errorMessage = '';
             let shouldClose = false;
 
             if (jobSuccess) {
-              message = [
-                'Thank you for your extension update!',
-                '',
-                'Your update has been received and our team has been notified.',
-                '',
-                'We will review your update as soon as possible. You can track the progress in our [Extension submissions](https://github.com/orgs/PortSwigger/projects/1) project.',
-                '',
-                'If you have any questions, please comment on this issue. For urgent matters, contact [bapps@portswigger.net](mailto:bapps@portswigger.net).'
-              ].join('\n');
+              templateKey = 'update-submission.success';
             } else {
               const specificError = extractError || validateError;
-              message = specificError
-                ? [
-                    '❌ Update submission failed.',
-                    '',
-                    `**Error:** ${specificError}`,
-                    '',
-                    'Please correct the issue and submit a new request.'
-                  ].join('\n')
-                : [
-                    '❌ Update submission failed.',
-                    '',
-                    'Your update could not be processed. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance.'
-                  ].join('\n');
+              templateKey = specificError
+                ? 'update-submission.failure-specific'
+                : 'update-submission.failure-generic';
+              errorMessage = specificError || '';
               shouldClose = true;
             }
 
-            // Base64 encode to prevent GitHub from masking the output
-            const encodedMessage = Buffer.from(message).toString('base64');
-            core.setOutput('comment_body', encodedMessage);
+            core.info(`Template key: ${templateKey}`);
+            core.info(`Error message: ${errorMessage}`);
+            core.info(`Should close: ${shouldClose}`);
+
+            core.setOutput('template_key', templateKey);
+            core.setOutput('error_message', errorMessage);
             core.setOutput('should_close', shouldClose.toString());
             core.setOutput('has_comment', 'true');
         env:
@@ -416,7 +384,8 @@ jobs:
     uses: ./.github/workflows/common-post-issue-comment.yml
     with:
       issue_number: ${{ github.event.issue.number }}
-      comment_body: ${{ needs.submit-extension.outputs.comment_body || needs.submit-update.outputs.comment_body }}
+      template_key: ${{ needs.submit-extension.outputs.template_key || needs.submit-update.outputs.template_key }}
+      error_message: ${{ needs.submit-extension.outputs.error_message || needs.submit-update.outputs.error_message }}
 
   close-issue:
     needs: [extract-issue-details, submit-extension, submit-update, post-comment]
