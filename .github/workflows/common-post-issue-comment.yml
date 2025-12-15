@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      TEMPLATE_FILE_PATH: .github/resources/comment-templates.yml
+      TEMPLATE_FILE_PATH: .github/resources/comment-templates.json
 
     steps:
       - name: Checkout comment templates
@@ -38,28 +38,25 @@ jobs:
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
-            const fs = require('fs');
-            const yaml = require('js-yaml');
+            const { readFileSync } = require('fs');
 
-            // Load and parse template
-            const templates = yaml.load(fs.readFileSync(process.env.TEMPLATE_FILE_PATH, 'utf8'));
+            // Load templates and get the specified one
+            const templates = JSON.parse(readFileSync(process.env.TEMPLATE_FILE_PATH, 'utf8'));
             const [category, type] = process.env.TEMPLATE_KEY.split('.');
+            const template = templates[category]?.[type];
 
-            // Render template with variable substitution
-            const body = templates[category]?.[type]?.replace(/\{\{(\w+)\}\}/g, (_, key) =>
-              process.env[key] || ''
-            );
-
-            if (!body) {
+            if (!template) {
               throw new Error(`Template not found: ${process.env.TEMPLATE_KEY}`);
             }
 
+            // Render template with environment variable substitution
+            const body = template.replace(/\{\{(\w+)\}\}/g, (_, key) => process.env[key] || '');
+
             // Post comment
             await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              ...context.repo,
               issue_number: parseInt(process.env.ISSUE_NUMBER),
-              body: body.trim()
+              body
             });
 
             core.info(`Posted comment to issue #${process.env.ISSUE_NUMBER} using template: ${process.env.TEMPLATE_KEY}`);
