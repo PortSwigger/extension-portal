@@ -49,8 +49,10 @@ jobs:
               throw new Error(`Template not found: ${process.env.TEMPLATE_KEY}`);
             }
 
-            // Render template with environment variable substitution
-            const body = template.replace(/\{\{(\w+)\}\}/g, (_, key) => process.env[key] || '');
+            // Join array into multiline string and render with environment variable substitution
+            const body = template
+              .join('\n')
+              .replace(/\{\{(\w+)\}\}/g, (_, key) => process.env[key] || '');
 
             // Post comment
             await github.rest.issues.createComment({

@@ -15,8 +15,8 @@ jobs:
     outputs:
       zoom_payload: ${{ steps.prepare_payload.outputs.payload }}
       should_notify: ${{ steps.prepare_payload.outputs.should_notify }}
-      template_key: ${{ steps.check_archived.outputs.template_key || '' }}
-      should_post_comment: ${{ steps.check_archived.outputs.template_key != '' }}
+      template_key: ${{ steps.check_archived.outputs.template_key || steps.reopen_success.outputs.template_key || '' }}
+      should_post_comment: ${{ steps.check_archived.outputs.template_key != '' || steps.reopen_success.outputs.template_key != '' }}
 
     steps:
       - name: Check if comment is a reopen request
@@ -135,6 +135,7 @@ jobs:
             core.setOutput('should_notify', 'true');
 
       - name: Reopen issue
+        id: reopen_success
         if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_archived.outputs.is_archived != 'true'
         uses: actions/github-script@v7
         with:
@@ -147,6 +148,7 @@ jobs:
             });
 
             core.info('Issue reopened successfully');
+            core.setOutput('template_key', 'reopen-issue.reopened');
 
   notify-zoom:
     needs: reopen-issue
