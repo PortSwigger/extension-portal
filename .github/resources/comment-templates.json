@@ -1,10 +1,6 @@
 {
   "extension-submission": {
     "success": [
-      "⚠️ **Please note:** Submissions will not be processed between 20th December and 5th January. Your submission will be reviewed after we return.",
-      "",
-      "---",
-      "",
       "Thank you for your BApp Store extension submission!",
       "",
       "Your submission has been added to our review queue.",
@@ -28,10 +24,6 @@
   },
   "update-submission": {
     "success": [
-      "⚠️ **Please note:** Submissions will not be processed between 20th December and 5th January. Your update will be reviewed after we return.",
-      "",
-      "---",
-      "",
       "Thank you for your extension update!",
       "",
       "Your update has been received and our team has been notified.",
@@ -55,10 +47,6 @@
   },
   "reopen-issue": {
     "archived": [
-      "⚠️ **Please note:** Submissions will not be processed between 20th December and 5th January. Your submission will be reviewed after we return.",
-      "",
-      "---",
-      "",
       "⚠️ This issue appears to be archived and has been removed from the project board.",
       "",
       "Our team has been notified and will manually restore it before reopening.",
@@ -66,10 +54,6 @@
       "Please allow some time for this to be processed."
     ],
     "reopened": [
-      "⚠️ **Please note:** Submissions will not be processed between 20th December and 5th January. Your submission will be reviewed after we return.",
-      "",
-      "---",
-      "",
       "✅ This issue has been reopened.",
       "",
       "We'll review your changes and move your ticket to the appropriate stage at the earliest opportunity."
