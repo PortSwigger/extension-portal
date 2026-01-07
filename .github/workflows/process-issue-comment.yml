@@ -2,7 +2,7 @@ name: Allow Issue Creator to Reopen
 
 on:
   issue_comment:
-    types: [created]
+    types: [created, edited]
 
 permissions:
   issues: write
@@ -32,21 +32,6 @@ jobs:
           else
             echo "is_reopen_request=false" >> $GITHUB_OUTPUT
           fi
-
-      # - name: Check if commenter is issue creator
-      #   id: check_creator
-      #   if: steps.check_comment.outputs.is_reopen_request == 'true'
-      #   run: |
-      #     ISSUE_CREATOR="${{ github.event.issue.user.login }}"
-      #     COMMENTER="${{ github.event.comment.user.login }}"
-      #
-      #     if [[ "$ISSUE_CREATOR" == "$COMMENTER" ]]; then
-      #       echo "is_creator=true" >> $GITHUB_OUTPUT
-      #     else
-      #       echo "is_creator=false" >> $GITHUB_OUTPUT
-      #       # Set non-creator comment
-      #       echo "comment=⚠️ Only the original issue creator can reopen this issue using the \`/reopen\` command. Please ask a maintainer for assistance or create a new issue if needed." >> $GITHUB_OUTPUT
-      #     fi
 
       - name: Generate GitHub App token
         id: generate_token
