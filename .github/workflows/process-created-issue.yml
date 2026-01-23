@@ -136,6 +136,58 @@ jobs:
           python3 .github/scripts/detect_language.py "${{ needs.extract-issue-details.outputs.url }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup Java
+        if: steps.extension_language.outputs.language == 'Java'
+        uses: actions/setup-java@v3
+        with:
+          distribution: "temurin"
+          java-version: 21
+
+      - name: Checkout extension repository
+        uses: actions/checkout@v4
+        if: steps.extension_language.outputs.language == 'Java'
+        with:
+          repository: '${{ steps.validate_repo.outputs.owner }}/${{ steps.validate_repo.outputs.repo }}'
+          path: 'extension-repo'
+
+      - name: Determine build platform
+        id: build_platform
+        if: steps.extension_language.outputs.language == 'Java'
+        working-directory: extension-repo
+        continue-on-error: true
+        run: |
+          if [[ -f "pom.xml" ]]; then
+            echo "BUILD_SYSTEM=Maven" >> $GITHUB_ENV
+            echo "build_system=Maven" >> $GITHUB_OUTPUT
+          elif [[ -f "build.gradle" || -f "build.gradle.kts" ]]; then
+            echo "BUILD_SYSTEM=Gradle" >> $GITHUB_ENV
+            echo "build_system=Gradle" >> $GITHUB_OUTPUT
+          else
+            echo "ERROR: Unable to detect Java build system (no pom.xml or build.gradle found)"
+            echo "Please provide a custom build command or ensure your project uses Maven or Gradle"
+            exit 1
+          fi
+
+      - name: Run Gradle
+        if: steps.build_platform.outputs.build_system == 'Gradle'
+        working-directory: extension-repo
+        continue-on-error: true
+        run: |
+          chmod +x gradlew || { echo "ERROR: Failed to make gradlew executable"; exit 1; }
+
+          if [ -d build ]; then
+            ./gradlew clean build || { echo "ERROR: Gradle clean build failed"; exit 1; }
+          else
+            ./gradlew build || { echo "ERROR: Gradle build failed"; exit 1; }
+          fi
+
+      - name: Run Maven
+        if: steps.build_platform.outputs.build_system == 'Maven'
+        working-directory: extension-repo
+        continue-on-error: true
+        run: |
+          mvn clean package || { echo "ERROR: Maven clean package failed"; exit 1; }
 
       - name: Create Jira ticket
         id: create_jira
