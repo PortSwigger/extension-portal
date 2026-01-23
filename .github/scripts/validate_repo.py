@@ -21,7 +21,7 @@ def extract_owner_repo(url):
     repo = match.group(2).rstrip('/')
     return owner, repo
 
-def validate_repo(url, github_token=None):
+def validate_repo(owner, repo, github_token=None):
     """
     Validate that the repository exists and is not a fork.
 
@@ -32,7 +32,6 @@ def validate_repo(url, github_token=None):
         ValueError: If the repository is invalid, doesn't exist, or is a fork
     """
     try:
-        owner, repo = extract_owner_repo(url)
         normalized_url = f"https://github.com/{owner}/{repo}"
 
         # Make GitHub API request
@@ -72,7 +71,10 @@ if __name__ == '__main__':
         sys.exit(1)
 
     try:
-        normalized_url = validate_repo(url, github_token)
+        owner, repo = extract_owner_repo(url)
+        normalized_url = validate_repo(owner, repo, github_token)
+        set_output('owner', owner)
+        set_output('repo', repo)
         set_output('normalized_url', normalized_url)
     except Exception as e:
         error_msg = str(e)
