@@ -50,7 +50,7 @@ body:
 - type: markdown
   attributes:
     value: |
-      ### Author details
+      ## Author details
 
 - type: input
   id: author_name
