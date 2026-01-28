@@ -31,7 +31,7 @@ body:
 - type: markdown
   attributes:
     value: |
-      ## Product Compatibility
+      ### Product Compatibility
       Professional is always included.
 
       - **Community** - This extension is compatible with Burp Suite Community.
@@ -41,11 +41,16 @@ body:
 - type: checkboxes
   id: product_compatibility
   attributes:
-    label: Select additional compatible products
+    label: Select additional compatible products and features
     options:
     - label: Community
     - label: DAST
     - label: Burp AI
+
+- type: markdown
+  attributes:
+    value: |
+      ### Author details
 
 - type: input
   id: author_name
