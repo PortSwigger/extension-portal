@@ -9,7 +9,6 @@ body:
       Provide the extension name as the title.
       Extension names should describe the functionality the extension is providing.
       Find the full BApp Store submission criteria [here](https://portswigger.net/burp/documentation/desktop/extend-burp/extensions/creating/bapp-store-acceptance-criteria).
-      **Additional: Adjust the labels on this ticket to inform us of product compatibility.**
 
 - type: input
   id: extension_url
@@ -28,6 +27,25 @@ body:
     placeholder: 1.0.0
   validations:
     required: true
+
+- type: markdown
+  attributes:
+    value: |
+      ## Product Compatibility
+      Professional is always included.
+
+      - **Community** - This extension is compatible with Burp Suite Community.
+      - **DAST** - This extension is compatible with Burp Suite DAST.
+      - **Burp AI** - This extension uses Burp AI features.
+
+- type: checkboxes
+  id: product_compatibility
+  attributes:
+    label: Select additional compatible products
+    options:
+    - label: Community
+    - label: DAST
+    - label: Burp AI
 
 - type: input
   id: author_name

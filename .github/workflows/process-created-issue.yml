@@ -21,6 +21,7 @@ jobs:
       author: ${{ steps.extract.outputs.author }}
       title: ${{ steps.extract.outputs.title }}
       error_message: ${{ steps.extract.outputs.error_message }}
+      product_compatibility: ${{ steps.extract.outputs.product_compatibility }}
 
     steps:
       - name: Extract submission details
@@ -85,6 +86,13 @@ jobs:
 
               core.setOutput('url', url);
 
+              // Extract product compatibility labels
+              const compatibilityOptions = ['Community', 'DAST', 'Burp AI'];
+              const productCompatibility = compatibilityOptions.filter(label =>
+                body.includes(`- [x] ${label}`) || body.includes(`- [X] ${label}`)
+              );
+              core.setOutput('product_compatibility', JSON.stringify(productCompatibility));
+
               if (missingFields.length > 0) {
                 throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
               }
@@ -110,6 +118,32 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Apply product compatibility labels
+        if: needs.extract-issue-details.outputs.product_compatibility != ''
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            try {
+              const compatibilityData = process.env.PRODUCT_COMPATIBILITY || '[]';
+              const labels = JSON.parse(compatibilityData);
+
+              if (Array.isArray(labels) && labels.length > 0) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  labels: labels
+                });
+                core.info(`Applied product compatibility labels: ${labels.join(', ')}`);
+              } else {
+                core.info('No additional product compatibility labels selected');
+              }
+            } catch (error) {
+              core.warning(`Failed to apply product compatibility labels: ${error.message}`);
+            }
+        env:
+          PRODUCT_COMPATIBILITY: ${{ needs.extract-issue-details.outputs.product_compatibility }}
 
       - name: Validate GitHub repository URL
         id: validate_url
