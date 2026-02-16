@@ -39,19 +39,27 @@ jobs:
           TARGET_REPO_URL: ${{ inputs.target_repo_url }}
           COMPATIBLE_PRODUCTS: ${{ inputs.compatible_products }}
         run: |
+          # Build JSON payload
+          payload=$(cat <<EOF
+          {
+            "ref": "$REF",
+            "inputs": {
+              "extension_name": "$EXTENSION_NAME",
+              "target_repo_url": "$TARGET_REPO_URL",
+              "compatible_products": "$COMPATIBLE_PRODUCTS"
+            }
+          }
+          EOF
+          )
+
+          echo "Payload:"
+          echo "$payload"
+
           curl -sS -f -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Content-Type: application/json" \
             https://api.github.com/repos/$OWNER/$REPO/actions/workflows/$WORKFLOW_FILE/dispatches \
-            -d @- <<'JSON'
-          {
-            "ref": "'"$REF"'",
-            "inputs": {
-              "extension_name": "'"$EXTENSION_NAME"'",
-              "target_repo_url": "'"$TARGET_REPO_URL"'",
-              "compatible_products": "'"$COMPATIBLE_PRODUCTS"'"
-            }
-          }
-          JSON
+            -d "$payload"
 
           echo "Workflow dispatch triggered successfully"
