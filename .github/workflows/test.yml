@@ -64,8 +64,7 @@ jobs:
             "inputs": {
               "extension_name": "'"$EXTENSION_NAME"'",
               "target_repo_url": "'"$TARGET_REPO_URL"'",
-              "compatible_products": "'"$COMPATIBLE_PRODUCTS"'",
-              "update": "false"
+              "compatible_products": "'"$COMPATIBLE_PRODUCTS"'"
             }
           }
           JSON
