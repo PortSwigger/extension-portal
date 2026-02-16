@@ -31,7 +31,7 @@ jobs:
         env:
           OWNER: PortSwigger
           REPO: extension-portal-internal
-          WORKFLOW_FILE: dispatch-sanitize-and-analyze.yml
+          WORKFLOW_FILE: sanitize-and-analyze.yml
           REF: main
           GH_TOKEN: ${{ steps.generate_token.outputs.token }}
           EXTENSION_NAME: ${{ inputs.extension_name }}
