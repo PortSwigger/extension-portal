@@ -26,6 +26,7 @@ jobs:
         with:
           app-id: ${{ secrets.PROJECT_ACCESS_APP_ID }}
           private-key: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
+          repositories: extension-portal-internal
 
       - name: Check repository access
         env:
