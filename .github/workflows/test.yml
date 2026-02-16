@@ -27,6 +27,21 @@ jobs:
           app-id: ${{ secrets.PROJECT_ACCESS_APP_ID }}
           private-key: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
 
+      - name: Check repository access
+        env:
+          OWNER: PortSwigger
+          REPO: extension-portal-internal
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+        run: |
+          echo "Checking access to $OWNER/$REPO..."
+          curl -sS -f \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/$OWNER/$REPO || {
+              echo "Failed to access repository. Check if GitHub App is installed on the repo."
+              exit 1
+            }
+
       - name: Trigger internal sanitize-and-analyze
         env:
           OWNER: PortSwigger
@@ -38,7 +53,7 @@ jobs:
           TARGET_REPO_URL: ${{ inputs.target_repo_url }}
           COMPATIBLE_PRODUCTS: ${{ inputs.compatible_products }}
         run: |
-          curl -sS -X POST \
+          curl -sS -f -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GH_TOKEN" \
             https://api.github.com/repos/$OWNER/$REPO/actions/workflows/$WORKFLOW_FILE/dispatches \
@@ -53,3 +68,5 @@ jobs:
             }
           }
           JSON
+
+          echo "Workflow dispatch triggered successfully"
