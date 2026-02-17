@@ -337,7 +337,7 @@ jobs:
           REF: main
           GH_TOKEN: ${{ steps.generate_token.outputs.token }}
           EXTENSION_NAME: ${{ needs.extract-issue-details.outputs.title }}
-          TARGET_REPO_URL: ${{ needs.extract-issue-details.outputs.url }}
+          TARGET_REPO_URL: ${{ steps.validate_repo.outputs.normalized_url }}
           COMPATIBLE_PRODUCTS: ${{ steps.convert_products.outputs.products }}
           JIRA_TICKET: ${{ steps.create_jira.outputs.jira_key }}
         run: |
