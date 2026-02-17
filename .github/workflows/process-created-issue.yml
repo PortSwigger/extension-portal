@@ -261,6 +261,8 @@ jobs:
             const jiraKey = jiraIssue.key;
             core.debug(`Created Jira ticket: ${jiraKey}`);
 
+            core.setOutput('jira_key', jiraKey);
+
             // Add remote link to GitHub issue
             const linkResponse = await fetch(`${process.env.JIRA_BASE_URL}/rest/api/3/issue/${jiraKey}/remotelink`, {
               method: 'POST',
@@ -280,8 +282,6 @@ jobs:
             } else {
               core.debug('Added remote link to Jira ticket');
             }
-
-            core.setOutput('jira_url', `${process.env.JIRA_BASE_URL}/browse/${jiraKey}`);
         env:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
@@ -339,6 +339,7 @@ jobs:
           EXTENSION_NAME: ${{ needs.extract-issue-details.outputs.title }}
           TARGET_REPO_URL: ${{ needs.extract-issue-details.outputs.url }}
           COMPATIBLE_PRODUCTS: ${{ steps.convert_products.outputs.products }}
+          JIRA_TICKET: ${{ steps.create_jira.outputs.jira_key }}
         run: |
           # Build JSON payload
           payload=$(cat <<EOF
@@ -347,7 +348,8 @@ jobs:
             "inputs": {
               "extension_name": "$EXTENSION_NAME",
               "target_repo_url": "$TARGET_REPO_URL",
-              "compatible_products": "$COMPATIBLE_PRODUCTS"
+              "compatible_products": "$COMPATIBLE_PRODUCTS",
+              "jira_ticket": "$JIRA_TICKET"
             }
           }
           EOF
@@ -436,8 +438,11 @@ jobs:
         with:
           script: |
             const title = process.env.TITLE;
-            const jiraUrl = process.env.JIRA_URL;
+            const jiraKey = process.env.JIRA_KEY;
+            const jiraBaseUrl = process.env.JIRA_BASE_URL;
             const issueUrl = context.payload.issue.html_url;
+
+            const jiraUrl = jiraKey ? `${jiraBaseUrl}/browse/${jiraKey}` : null;
 
             const payload = {
               "Extension": title,
@@ -450,7 +455,8 @@ jobs:
             core.setOutput('payload', encodedPayload);
         env:
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
-          JIRA_URL: ${{ steps.create_jira.outputs.jira_url }}
+          JIRA_KEY: ${{ steps.create_jira.outputs.jira_key }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
 
   submit-update:
     needs: extract-issue-details
