@@ -7,7 +7,7 @@ Submissions are automatically added to the review queue and tracked throughout t
 ## Extension submission requirements
 
 Before submitting an extension, please ensure:
-- You have permission from all relevant persons to submit this extension to the BApp Store for public use, under the [terms and conditions of the EULA](https://portswigger.net/burp/legal)
+- You have permission from all relevant persons to submit this extension to the BApp Store for public use, under the [terms and conditions of the EULA](https://portswigger.net/legal)
 - You have read and understood the [submission requirements for the BApp Store](https://portswigger.net/burp/documentation/desktop/extend-burp/extensions/creating/bapp-store-acceptance-criteria)
 
 ## New extension submission
