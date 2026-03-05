@@ -265,8 +265,7 @@ jobs:
             });
 
             if (!createResponse.ok) {
-              const errorText = await createResponse.text();
-              core.warning(`Jira API error: ${createResponse.status} - ${errorText}`);
+              core.warning(`Jira API error: ${createResponse.status}`);
 
               throw new Error(`Failed to create Jira ticket: ${createResponse.status}`);
             }
