@@ -73,18 +73,37 @@ jobs:
               core.setOutput('title', title);
               core.setOutput('author', author);
 
+              const GITHUB_REPO_URL_RE = /^https:\/\/github\.com\/[a-zA-Z0-9][a-zA-Z0-9-]{0,37}[a-zA-Z0-9]\/[a-zA-Z0-9_.-]{1,100}\/?$/;
+              const GITHUB_PR_URL_RE = /^https:\/\/github\.com\/[Pp]ort[Ss]wigger\/[a-zA-Z0-9_.-]{1,100}\/pull\/\d+\/?$/;
+
+              const validateUrl = (raw, pattern) => {
+                if (!raw || raw.length > 500) return null;
+                const trimmed = raw.trim();
+                return pattern.test(trimmed) ? trimmed : null;
+              };
+
               let url;
               if (body.includes('template:01-submit-extension')) {
-                url = extractField(/### Extension URL\s+([^\s]+)/);
-                if (isFieldEmpty(url)) missingFields.push('Extension URL');
+                const rawUrl = extractField(/### Extension URL\s+([^\s]+)/);
+                if (isFieldEmpty(rawUrl)) {
+                  missingFields.push('Extension URL');
+                } else {
+                  url = validateUrl(rawUrl, GITHUB_REPO_URL_RE);
+                  if (!url) throw new Error('Invalid Extension URL format. Expected: https://github.com/owner/repo');
+                }
                 if (isFieldEmpty(author)) missingFields.push('Author display name');
               } else if (body.includes('template:02-submit-update')) {
-                url = extractField(/### Pull request URL\s+([^\s]+)/);
-                if (isFieldEmpty(url)) missingFields.push('Pull request URL');
+                const rawUrl = extractField(/### Pull request URL\s+([^\s]+)/);
+                if (isFieldEmpty(rawUrl)) {
+                  missingFields.push('Pull request URL');
+                } else {
+                  url = validateUrl(rawUrl, GITHUB_PR_URL_RE);
+                  if (!url) throw new Error('Invalid Pull Request URL format. Expected: https://github.com/PortSwigger/repo/pull/123');
+                }
                 // Author is optional for updates
               }
 
-              core.setOutput('url', url);
+              core.setOutput('url', url ?? '');
 
               // Extract product compatibility labels
               const compatibilityOptions = ['Community', 'DAST', 'Burp AI'];
@@ -146,18 +165,9 @@ jobs:
         env:
           PRODUCT_COMPATIBILITY: ${{ needs.extract-issue-details.outputs.product_compatibility }}
 
-      - name: Validate GitHub repository URL
-        id: validate_url
-        if: needs.extract-issue-details.outputs.error_message == ''
-        continue-on-error: true
-        run: |
-          python3 .github/scripts/validate_repo_url.py "$URL" new-submission
-        env:
-          URL: ${{ needs.extract-issue-details.outputs.url }}
-
       - name: Verify repository exists and is not a fork
         id: validate_repo
-        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_url.outcome == 'success'
+        if: needs.extract-issue-details.outputs.error_message == ''
         continue-on-error: true
         run: |
           python3 .github/scripts/validate_repo.py
@@ -229,7 +239,7 @@ jobs:
 
       - name: Create Jira ticket
         id: create_jira
-        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_url.outcome == 'success' && steps.validate_repo.outcome == 'success'
+        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_repo.outcome == 'success'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -376,19 +386,16 @@ jobs:
         with:
           script: |
             const extractError = process.env.EXTRACT_ERROR || '';
-            const validateUrlOutcome = process.env.VALIDATE_URL_OUTCOME || 'skipped';
-            const validateUrlError = process.env.VALIDATE_URL_ERROR || '';
             const validateRepoOutcome = process.env.VALIDATE_REPO_OUTCOME || 'skipped';
             const validateRepoError = process.env.VALIDATE_REPO_ERROR || '';
             const createJiraOutcome = process.env.CREATE_JIRA_OUTCOME || 'skipped';
 
             core.info(`Extract error: "${extractError}"`);
-            core.info(`Validate URL outcome: "${validateUrlOutcome}"`);
             core.info(`Validate repo outcome: "${validateRepoOutcome}"`);
             core.info(`Create Jira outcome: "${createJiraOutcome}"`);
 
             // Job is successful if there are no errors and all outcomes are success
-            const jobSuccess = !extractError && validateUrlOutcome === 'success' && validateRepoOutcome === 'success' && createJiraOutcome === 'success';
+            const jobSuccess = !extractError && validateRepoOutcome === 'success' && createJiraOutcome === 'success';
 
             core.info(`Job success: ${jobSuccess}`);
 
@@ -400,10 +407,6 @@ jobs:
               templateKey = 'extension-submission.success';
             } else {
               let specificError = extractError;
-
-              if (!specificError && validateUrlOutcome === 'failure') {
-                specificError = validateUrlError || 'Invalid GitHub repository URL format.';
-              }
 
               if (!specificError && validateRepoOutcome === 'failure') {
                 specificError = validateRepoError || 'Repository validation failed. The repository may be a fork or not accessible.';
@@ -430,15 +433,13 @@ jobs:
             core.setOutput('has_comment', 'true');
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
-          VALIDATE_URL_OUTCOME: ${{ steps.validate_url.outcome }}
-          VALIDATE_URL_ERROR: ${{ steps.validate_url.outputs.error_message || '' }}
           VALIDATE_REPO_OUTCOME: ${{ steps.validate_repo.outcome }}
           VALIDATE_REPO_ERROR: ${{ steps.validate_repo.outputs.error_message || '' }}
           CREATE_JIRA_OUTCOME: ${{ steps.create_jira.outcome }}
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
-        if: steps.validate_url.outcome == 'success' && steps.validate_repo.outcome == 'success'
+        if: steps.validate_repo.outcome == 'success'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -477,18 +478,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate pull request URL
-        id: validate_pr
-        if: needs.extract-issue-details.outputs.error_message == ''
-        continue-on-error: true
-        run: |
-          python3 .github/scripts/validate_repo_url.py "$URL"
-        env:
-          URL: ${{ needs.extract-issue-details.outputs.url }}
-
       - name: Prepare Zoom notification payload
         id: prepare_zoom
-        if: steps.validate_pr.outcome == 'success'
+        if: needs.extract-issue-details.outputs.error_message == ''
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -520,10 +512,9 @@ jobs:
         with:
           script: |
             const extractError = process.env.EXTRACT_ERROR || '';
-            const validateError = process.env.VALIDATE_ERROR || '';
 
             // Job is successful if there are no errors
-            const jobSuccess = !extractError && !validateError;
+            const jobSuccess = !extractError;
 
             let templateKey;
             let errorMessage = '';
@@ -532,7 +523,7 @@ jobs:
             if (jobSuccess) {
               templateKey = 'update-submission.success';
             } else {
-              const specificError = extractError || validateError;
+              const specificError = extractError;
               templateKey = specificError
                 ? 'update-submission.failure-specific'
                 : 'update-submission.failure-generic';
@@ -550,7 +541,6 @@ jobs:
             core.setOutput('has_comment', 'true');
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
-          VALIDATE_ERROR: ${{ steps.validate_pr.outputs.error_message }}
 
   post-comment:
     needs: [extract-issue-details, submit-extension, submit-update]
