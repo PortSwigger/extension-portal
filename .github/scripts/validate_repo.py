@@ -55,9 +55,7 @@ def validate_repo(owner, repo, github_token=None):
 
     except error.HTTPError as e:
         if e.code == 404:
-            owner, repo = extract_owner_repo(url)
-            repo_name = f"{owner}/{repo}"
-            raise ValueError(f"GitHub repository not found: {repo_name}")
+            raise ValueError(f"GitHub repository not found: {owner}/{repo}")
         raise ValueError(f"GitHub API error: {e.code} {e.reason}")
 
 if __name__ == '__main__':
