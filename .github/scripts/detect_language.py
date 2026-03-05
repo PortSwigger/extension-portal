@@ -90,10 +90,10 @@ def detect_language(url, github_token=None):
 
 def main():
     """Main entry point for GitHub Actions workflow."""
-    url = sys.argv[1] if len(sys.argv) > 1 else None
+    url = os.environ.get('URL')
 
     if not url:
-        error_msg = 'Repository URL is required'
+        error_msg = 'URL environment variable is required'
         print(f'::error::{error_msg}', file=sys.stderr)
         set_output('error_message', error_msg)
         sys.exit(1)

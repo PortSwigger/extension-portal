@@ -180,7 +180,7 @@ jobs:
         if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_repo.outcome == 'success'
         continue-on-error: true
         run: |
-          python3 .github/scripts/detect_language.py "$URL"
+          python3 .github/scripts/detect_language.py
         env:
           URL: ${{ needs.extract-issue-details.outputs.url }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
