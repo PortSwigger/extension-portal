@@ -184,13 +184,6 @@ jobs:
         env:
           URL: ${{ needs.extract-issue-details.outputs.url }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Setup Java
-        if: steps.extension_language.outputs.language == 'Java'
-        uses: actions/setup-java@17f84c3641ba7b8f6deff6309fc4c864478f5d62 # v3
-        with:
-          distribution: "temurin"
-          java-version: 21
 
       - name: Checkout extension repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -209,37 +202,26 @@ jobs:
             echo "BUILD_SYSTEM=Maven" >> $GITHUB_ENV
             echo "build_system=Maven" >> $GITHUB_OUTPUT
           elif [[ -f "build.gradle" || -f "build.gradle.kts" ]]; then
+            if [[ ! -f "gradlew" ]]; then
+              echo "error_message=Gradle wrapper (gradlew) not found. Please include gradlew in your repository." >> $GITHUB_OUTPUT
+              echo "ERROR: Gradle wrapper (gradlew) not found"
+              exit 1
+            fi
             echo "BUILD_SYSTEM=Gradle" >> $GITHUB_ENV
             echo "build_system=Gradle" >> $GITHUB_OUTPUT
           else
+            echo "error_message=No build system found. Please ensure your repository contains pom.xml (Maven) or build.gradle (Gradle)." >> $GITHUB_OUTPUT
             echo "ERROR: Unable to detect Java build system (no pom.xml or build.gradle found)"
-            echo "Please provide a custom build command or ensure your project uses Maven or Gradle"
+            echo "Please ensure your project uses Maven or Gradle"
             exit 1
           fi
 
-      - name: Run Gradle
-        if: steps.build_platform.outputs.build_system == 'Gradle'
-        working-directory: extension-repo
-        continue-on-error: true
-        run: |
-          chmod +x gradlew || { echo "ERROR: Failed to make gradlew executable"; exit 1; }
-
-          if [ -d build ]; then
-            ./gradlew clean build || { echo "ERROR: Gradle clean build failed"; exit 1; }
-          else
-            ./gradlew build || { echo "ERROR: Gradle build failed"; exit 1; }
-          fi
-
-      - name: Run Maven
-        if: steps.build_platform.outputs.build_system == 'Maven'
-        working-directory: extension-repo
-        continue-on-error: true
-        run: |
-          mvn clean package || { echo "ERROR: Maven clean package failed"; exit 1; }
-
       - name: Create Jira ticket
         id: create_jira
-        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_repo.outcome == 'success'
+        if: |
+          needs.extract-issue-details.outputs.error_message == '' &&
+          steps.validate_repo.outcome == 'success' &&
+          (steps.build_platform.outcome == 'success' || steps.build_platform.outcome == 'skipped')
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -382,14 +364,17 @@ jobs:
             const extractError = process.env.EXTRACT_ERROR || '';
             const validateRepoOutcome = process.env.VALIDATE_REPO_OUTCOME || 'skipped';
             const validateRepoError = process.env.VALIDATE_REPO_ERROR || '';
+            const buildPlatformOutcome = process.env.BUILD_PLATFORM_OUTCOME || 'skipped';
+            const buildPlatformError = process.env.BUILD_PLATFORM_ERROR || '';
             const createJiraOutcome = process.env.CREATE_JIRA_OUTCOME || 'skipped';
 
             core.info(`Extract error: "${extractError}"`);
             core.info(`Validate repo outcome: "${validateRepoOutcome}"`);
+            core.info(`Build platform outcome: "${buildPlatformOutcome}"`);
             core.info(`Create Jira outcome: "${createJiraOutcome}"`);
 
             // Job is successful if there are no errors and all outcomes are success
-            const jobSuccess = !extractError && validateRepoOutcome === 'success' && createJiraOutcome === 'success';
+            const jobSuccess = !extractError && validateRepoOutcome === 'success' && buildPlatformOutcome !== 'failure' && createJiraOutcome === 'success';
 
             core.info(`Job success: ${jobSuccess}`);
 
@@ -404,6 +389,10 @@ jobs:
 
               if (!specificError && validateRepoOutcome === 'failure') {
                 specificError = validateRepoError || 'Repository validation failed. The repository may be a fork or not accessible.';
+              }
+
+              if (!specificError && buildPlatformOutcome === 'failure') {
+                specificError = buildPlatformError || 'Build system validation failed. Please ensure your repository contains a valid Maven or Gradle build configuration.';
               }
 
               if (!specificError && createJiraOutcome === 'failure') {
@@ -429,6 +418,8 @@ jobs:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
           VALIDATE_REPO_OUTCOME: ${{ steps.validate_repo.outcome }}
           VALIDATE_REPO_ERROR: ${{ steps.validate_repo.outputs.error_message || '' }}
+          BUILD_PLATFORM_OUTCOME: ${{ steps.build_platform.outcome }}
+          BUILD_PLATFORM_ERROR: ${{ steps.build_platform.outputs.error_message || '' }}
           CREATE_JIRA_OUTCOME: ${{ steps.create_jira.outcome }}
 
       - name: Prepare Zoom notification payload
@@ -470,7 +461,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
