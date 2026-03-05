@@ -356,19 +356,14 @@ jobs:
           COMPATIBLE_PRODUCTS: ${{ steps.convert_products.outputs.products }}
           JIRA_TICKET: ${{ steps.create_jira.outputs.jira_key }}
         run: |
-          # Build JSON payload
-          payload=$(cat <<EOF
-          {
-            "ref": "$REF",
-            "inputs": {
-              "extension_name": "$EXTENSION_NAME",
-              "target_repo_url": "$TARGET_REPO_URL",
-              "compatible_products": "$COMPATIBLE_PRODUCTS",
-              "jira_ticket": "$JIRA_TICKET"
-            }
-          }
-          EOF
-          )
+          # Build JSON payload using jq to safely escape all values
+          payload=$(jq -n \
+            --arg ref "$REF" \
+            --arg extension_name "$EXTENSION_NAME" \
+            --arg target_repo_url "$TARGET_REPO_URL" \
+            --arg compatible_products "$COMPATIBLE_PRODUCTS" \
+            --arg jira_ticket "$JIRA_TICKET" \
+            '{"ref": $ref, "inputs": {"extension_name": $extension_name, "target_repo_url": $target_repo_url, "compatible_products": $compatible_products, "jira_ticket": $jira_ticket}}')
 
           curl -sS -f -X POST \
             -H "Accept: application/vnd.github+json" \
