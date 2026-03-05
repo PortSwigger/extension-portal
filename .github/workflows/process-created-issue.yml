@@ -151,7 +151,9 @@ jobs:
         if: needs.extract-issue-details.outputs.error_message == ''
         continue-on-error: true
         run: |
-          python3 .github/scripts/validate_repo_url.py "${{ needs.extract-issue-details.outputs.url }}" new-submission
+          python3 .github/scripts/validate_repo_url.py "$URL" new-submission
+        env:
+          URL: ${{ needs.extract-issue-details.outputs.url }}
 
       - name: Verify repository exists and is not a fork
         id: validate_repo
@@ -168,8 +170,9 @@ jobs:
         if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_repo.outcome == 'success'
         continue-on-error: true
         run: |
-          python3 .github/scripts/detect_language.py "${{ needs.extract-issue-details.outputs.url }}"
+          python3 .github/scripts/detect_language.py "$URL"
         env:
+          URL: ${{ needs.extract-issue-details.outputs.url }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Setup Java
@@ -479,7 +482,9 @@ jobs:
         if: needs.extract-issue-details.outputs.error_message == ''
         continue-on-error: true
         run: |
-          python3 .github/scripts/validate_repo_url.py "${{ needs.extract-issue-details.outputs.url }}"
+          python3 .github/scripts/validate_repo_url.py "$URL"
+        env:
+          URL: ${{ needs.extract-issue-details.outputs.url }}
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
