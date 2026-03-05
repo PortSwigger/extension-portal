@@ -136,7 +136,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Apply product compatibility labels
         if: needs.extract-issue-details.outputs.product_compatibility != ''
@@ -187,13 +187,13 @@ jobs:
       
       - name: Setup Java
         if: steps.extension_language.outputs.language == 'Java'
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@17f84c3641ba7b8f6deff6309fc4c864478f5d62 # v3
         with:
           distribution: "temurin"
           java-version: 21
 
       - name: Checkout extension repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         if: steps.extension_language.outputs.language == 'Java'
         with:
           repository: '${{ steps.validate_repo.outputs.owner }}/${{ steps.validate_repo.outputs.repo }}'
@@ -308,7 +308,7 @@ jobs:
         id: generate_token
         if: steps.create_jira.outcome == 'success'
         continue-on-error: true
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
         with:
           app-id: ${{ secrets.PROJECT_ACCESS_APP_ID }}
           private-key: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
