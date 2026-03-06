@@ -420,18 +420,21 @@ jobs:
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
-        if: needs.validate-extension.outputs.error_message == ''
+        if: needs.extract-issue-details.outputs.error_message == ''
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const title = process.env.TITLE;
             const jiraUrl = process.env.JIRA_URL;
+            const validateError = process.env.VALIDATE_ERROR;
             const issueUrl = context.payload.issue.html_url;
 
             const payload = {
               "Extension": title,
-              "Jira Ticket": jiraUrl || '❌ Not created',
-              "Issue": issueUrl
+              "Issue": issueUrl,
+              ...(validateError
+                ? { "Validation Error": `❌ ${validateError}` }
+                : { "Jira Ticket": jiraUrl || '❌ Not created' })
             };
 
             // Base64 encode to prevent GitHub from masking the output
@@ -440,6 +443,7 @@ jobs:
         env:
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
           JIRA_URL: ${{ steps.create_jira.outputs.jira_url }}
+          VALIDATE_ERROR: ${{ needs.validate-extension.outputs.error_message }}
 
   submit-update:
     needs: extract-issue-details
