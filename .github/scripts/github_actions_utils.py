@@ -19,6 +19,9 @@ def set_output(key, value):
     or prints to stdout for local testing. This ensures scripts remain
     testable and portable outside GitHub Actions.
 
+    Uses the heredoc delimiter format so that values containing newlines
+    or '=' characters cannot inject additional output entries.
+
     Args:
         key: Output variable name
         value: Output variable value
@@ -35,12 +38,8 @@ def set_output(key, value):
     if github_output:
         try:
             with open(github_output, 'a') as f:
-                # Escape special characters per GitHub Actions spec
-                safe_value = (str(value)
-                    .replace('%', '%25')
-                    .replace('\r', '%0D')
-                    .replace('\n', '%0A'))
-                f.write(f'{key}={safe_value}\n')
+                delimiter = f'ghadelimiter_{os.urandom(8).hex()}'
+                f.write(f'{key}<<{delimiter}\n{value}\n{delimiter}\n')
         except Exception as e:
             print(f'::warning::Could not write {key} to GITHUB_OUTPUT: {e}', file=sys.stderr)
     else:

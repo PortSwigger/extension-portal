@@ -49,10 +49,18 @@ jobs:
               throw new Error(`Template not found: ${process.env.TEMPLATE_KEY}`);
             }
 
+            // Escape markdown special characters in user-influenced values
+            const escapeMarkdown = (text) => text
+              .replace(/\\/g, '\\\\')
+              .replace(/[*_`[\]]/g, c => `\\${c}`);
+
             // Join array into multiline string and render with environment variable substitution
             const body = template
               .join('\n')
-              .replace(/\{\{(\w+)\}\}/g, (_, key) => process.env[key] || '');
+              .replace(/\{\{(\w+)\}\}/g, (_, key) => {
+                const val = process.env[key] || '';
+                return key === 'ERROR_MESSAGE' ? escapeMarkdown(val) : val;
+              });
 
             // Post comment
             await github.rest.issues.createComment({

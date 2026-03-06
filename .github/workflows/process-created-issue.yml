@@ -8,6 +8,10 @@ permissions:
   issues: write
   contents: read
 
+concurrency:
+  group: portal-issue-${{ github.event.issue.user.login }}
+  cancel-in-progress: false
+
 jobs:
   extract-issue-details:
     if: |
@@ -15,6 +19,8 @@ jobs:
       contains(github.event.issue.body, 'template:02-submit-update')
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     outputs:
       url: ${{ steps.extract.outputs.url }}
       version_number: ${{ steps.extract.outputs.version_number }}
@@ -65,7 +71,7 @@ jobs:
               // Extract common fields
               const versionNumber = validateVersion(extractField(/### Version number\s+([^\n]+)/));
               if (isFieldEmpty(versionNumber)) missingFields.push('Version number');
-              
+
               const title = sanitizeText(context.payload.issue.title, 200);
               const author = sanitizeText(extractField(/### Author display name\s+([^\n]+)/), 100);
 
@@ -120,10 +126,105 @@ jobs:
               throw error;
             }
 
-  submit-extension:
+  validate-extension:
     needs: extract-issue-details
     if: |
-      always() &&
+      !cancelled() &&
+      contains(github.event.issue.body, 'template:01-submit-extension')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      error_message: ${{ steps.summarise.outputs.error_message }}
+      normalized_url: ${{ steps.validate_repo.outputs.normalized_url }}
+
+    steps:
+      - name: Harden runner
+        uses: portswigger-tim/safer-runner-action@b2208f653b6bf422e08501155f4df82bad008184 # v1.2.2
+        with:
+          mode: enforce
+          disable-sudo: 'true'
+          disable-docker: 'true'
+
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Verify repository exists and is not a fork
+        id: validate_repo
+        if: needs.extract-issue-details.outputs.error_message == ''
+        run: |
+          python3 .github/scripts/validate_repo.py
+        env:
+          URL: ${{ needs.extract-issue-details.outputs.url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Identify extension language
+        id: extension_language
+        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_repo.outcome == 'success'
+        run: |
+          python3 .github/scripts/detect_language.py
+        env:
+          URL: ${{ needs.extract-issue-details.outputs.url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout extension repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        if: steps.extension_language.outputs.language == 'Java'
+        with:
+          repository: '${{ steps.validate_repo.outputs.owner }}/${{ steps.validate_repo.outputs.repo }}'
+          path: 'extension-repo'
+
+      - name: Determine build platform
+        id: build_platform
+        if: steps.extension_language.outputs.language == 'Java'
+        working-directory: extension-repo
+        run: |
+          if [[ -f "pom.xml" ]]; then
+            echo "build_system=Maven" >> $GITHUB_OUTPUT
+          elif [[ -f "build.gradle" || -f "build.gradle.kts" ]]; then
+            if [[ ! -f "gradlew" ]]; then
+              echo "error_message=Gradle wrapper (gradlew) not found. Please include gradlew in your repository." >> $GITHUB_OUTPUT
+              echo "ERROR: Gradle wrapper (gradlew) not found"
+              exit 1
+            fi
+            echo "build_system=Gradle" >> $GITHUB_OUTPUT
+          else
+            echo "error_message=No build system found. Please ensure your repository contains pom.xml (Maven) or build.gradle (Gradle)." >> $GITHUB_OUTPUT
+            echo "ERROR: Unable to detect Java build system (no pom.xml or build.gradle found)"
+            echo "Please ensure your project uses Maven or Gradle"
+            exit 1
+          fi
+
+      - name: Summarise validation result
+        id: summarise
+        if: '!cancelled()'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const validateOutcome = process.env.VALIDATE_OUTCOME;
+            const validateError = process.env.VALIDATE_ERROR;
+            const buildOutcome = process.env.BUILD_OUTCOME;
+            const buildError = process.env.BUILD_ERROR;
+
+            let message = '';
+            if (validateOutcome === 'failure') {
+              message = validateError || 'Repository validation failed. The repository may be a fork or not accessible.';
+            } else if (buildOutcome === 'failure') {
+              message = buildError || 'Build system validation failed. Please ensure your repository contains a valid Maven or Gradle build configuration.';
+            }
+
+            core.setOutput('error_message', message);
+        env:
+          VALIDATE_OUTCOME: ${{ steps.validate_repo.outcome }}
+          VALIDATE_ERROR: ${{ steps.validate_repo.outputs.error_message }}
+          BUILD_OUTCOME: ${{ steps.build_platform.outcome }}
+          BUILD_ERROR: ${{ steps.build_platform.outputs.error_message }}
+
+  submit-extension:
+    needs: [extract-issue-details, validate-extension]
+    if: |
+      !cancelled() &&
       contains(github.event.issue.body, 'template:01-submit-extension')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -135,9 +236,6 @@ jobs:
       has_comment: ${{ steps.prepare_comment.outputs.has_comment }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
       - name: Apply product compatibility labels
         if: needs.extract-issue-details.outputs.product_compatibility != ''
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
@@ -165,63 +263,11 @@ jobs:
         env:
           PRODUCT_COMPATIBILITY: ${{ needs.extract-issue-details.outputs.product_compatibility }}
 
-      - name: Verify repository exists and is not a fork
-        id: validate_repo
-        if: needs.extract-issue-details.outputs.error_message == ''
-        continue-on-error: true
-        run: |
-          python3 .github/scripts/validate_repo.py
-        env:
-          URL: ${{ needs.extract-issue-details.outputs.url }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Identify extension language
-        id: extension_language
-        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_repo.outcome == 'success'
-        continue-on-error: true
-        run: |
-          python3 .github/scripts/detect_language.py
-        env:
-          URL: ${{ needs.extract-issue-details.outputs.url }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Checkout extension repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        if: steps.extension_language.outputs.language == 'Java'
-        with:
-          repository: '${{ steps.validate_repo.outputs.owner }}/${{ steps.validate_repo.outputs.repo }}'
-          path: 'extension-repo'
-
-      - name: Determine build platform
-        id: build_platform
-        if: steps.extension_language.outputs.language == 'Java'
-        working-directory: extension-repo
-        continue-on-error: true
-        run: |
-          if [[ -f "pom.xml" ]]; then
-            echo "BUILD_SYSTEM=Maven" >> $GITHUB_ENV
-            echo "build_system=Maven" >> $GITHUB_OUTPUT
-          elif [[ -f "build.gradle" || -f "build.gradle.kts" ]]; then
-            if [[ ! -f "gradlew" ]]; then
-              echo "error_message=Gradle wrapper (gradlew) not found. Please include gradlew in your repository." >> $GITHUB_OUTPUT
-              echo "ERROR: Gradle wrapper (gradlew) not found"
-              exit 1
-            fi
-            echo "BUILD_SYSTEM=Gradle" >> $GITHUB_ENV
-            echo "build_system=Gradle" >> $GITHUB_OUTPUT
-          else
-            echo "error_message=No build system found. Please ensure your repository contains pom.xml (Maven) or build.gradle (Gradle)." >> $GITHUB_OUTPUT
-            echo "ERROR: Unable to detect Java build system (no pom.xml or build.gradle found)"
-            echo "Please ensure your project uses Maven or Gradle"
-            exit 1
-          fi
-
       - name: Create Jira ticket
         id: create_jira
         if: |
           needs.extract-issue-details.outputs.error_message == '' &&
-          steps.validate_repo.outcome == 'success' &&
-          (steps.build_platform.outcome == 'success' || steps.build_platform.outcome == 'skipped')
+          needs.validate-extension.outputs.error_message == ''
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -311,7 +357,7 @@ jobs:
           REF: main
           GH_TOKEN: ${{ steps.generate_token.outputs.token }}
           EXTENSION_NAME: ${{ needs.extract-issue-details.outputs.title }}
-          TARGET_REPO_URL: ${{ steps.validate_repo.outputs.normalized_url }}
+          TARGET_REPO_URL: ${{ needs.validate-extension.outputs.normalized_url }}
           COMPATIBLE_PRODUCTS: ${{ steps.convert_products.outputs.products }}
           JIRA_TICKET: ${{ steps.create_jira.outputs.jira_key }}
         run: |
@@ -335,26 +381,15 @@ jobs:
 
       - name: Prepare comment data
         id: prepare_comment
-        if: always()
+        if: '!cancelled()'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const extractError = process.env.EXTRACT_ERROR || '';
-            const validateRepoOutcome = process.env.VALIDATE_REPO_OUTCOME || 'skipped';
-            const validateRepoError = process.env.VALIDATE_REPO_ERROR || '';
-            const buildPlatformOutcome = process.env.BUILD_PLATFORM_OUTCOME || 'skipped';
-            const buildPlatformError = process.env.BUILD_PLATFORM_ERROR || '';
+            const validateError = process.env.VALIDATE_ERROR || '';
             const createJiraOutcome = process.env.CREATE_JIRA_OUTCOME || 'skipped';
 
-            core.info(`Extract error: "${extractError}"`);
-            core.info(`Validate repo outcome: "${validateRepoOutcome}"`);
-            core.info(`Build platform outcome: "${buildPlatformOutcome}"`);
-            core.info(`Create Jira outcome: "${createJiraOutcome}"`);
-
-            // Job is successful if there are no errors and all outcomes are success
-            const jobSuccess = !extractError && validateRepoOutcome === 'success' && buildPlatformOutcome !== 'failure' && createJiraOutcome === 'success';
-
-            core.info(`Job success: ${jobSuccess}`);
+            const jobSuccess = !extractError && !validateError && createJiraOutcome === 'success';
 
             let templateKey;
             let errorMessage = '';
@@ -363,30 +398,15 @@ jobs:
             if (jobSuccess) {
               templateKey = 'extension-submission.success';
             } else {
-              let specificError = extractError;
-
-              if (!specificError && validateRepoOutcome === 'failure') {
-                specificError = validateRepoError || 'Repository validation failed. The repository may be a fork or not accessible.';
-              }
-
-              if (!specificError && buildPlatformOutcome === 'failure') {
-                specificError = buildPlatformError || 'Build system validation failed. Please ensure your repository contains a valid Maven or Gradle build configuration.';
-              }
-
-              if (!specificError && createJiraOutcome === 'failure') {
-                specificError = 'Failed to create ticket. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance.';
-              }
-
+              const specificError = extractError || validateError || (createJiraOutcome === 'failure'
+                ? 'Failed to create ticket. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance.'
+                : '');
               templateKey = specificError
                 ? 'extension-submission.failure-specific'
                 : 'extension-submission.failure-generic';
-              errorMessage = specificError || '';
+              errorMessage = specificError;
               shouldClose = true;
             }
-
-            core.info(`Template key: ${templateKey}`);
-            core.info(`Error message: ${errorMessage}`);
-            core.info(`Should close: ${shouldClose}`);
 
             core.setOutput('template_key', templateKey);
             core.setOutput('error_message', errorMessage);
@@ -394,15 +414,12 @@ jobs:
             core.setOutput('has_comment', 'true');
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
-          VALIDATE_REPO_OUTCOME: ${{ steps.validate_repo.outcome }}
-          VALIDATE_REPO_ERROR: ${{ steps.validate_repo.outputs.error_message || '' }}
-          BUILD_PLATFORM_OUTCOME: ${{ steps.build_platform.outcome }}
-          BUILD_PLATFORM_ERROR: ${{ steps.build_platform.outputs.error_message || '' }}
+          VALIDATE_ERROR: ${{ needs.validate-extension.outputs.error_message }}
           CREATE_JIRA_OUTCOME: ${{ steps.create_jira.outcome }}
 
       - name: Prepare Zoom notification payload
         id: prepare_zoom
-        if: steps.validate_repo.outcome == 'success'
+        if: needs.validate-extension.outputs.error_message == ''
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -426,7 +443,7 @@ jobs:
   submit-update:
     needs: extract-issue-details
     if: |
-      always() &&
+      !cancelled() &&
       contains(github.event.issue.body, 'template:02-submit-update')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -438,9 +455,6 @@ jobs:
       has_comment: ${{ steps.prepare_comment.outputs.has_comment }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
       - name: Prepare Zoom notification payload
         id: prepare_zoom
         if: needs.extract-issue-details.outputs.error_message == ''
@@ -470,7 +484,7 @@ jobs:
 
       - name: Prepare comment data
         id: prepare_comment
-        if: always()
+        if: '!cancelled()'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -508,7 +522,7 @@ jobs:
   post-comment:
     needs: [extract-issue-details, submit-extension, submit-update]
     if: |
-      always() &&
+      !cancelled() &&
       (needs.submit-extension.outputs.has_comment == 'true' ||
        needs.submit-update.outputs.has_comment == 'true')
     uses: ./.github/workflows/common-post-issue-comment.yml
@@ -520,12 +534,14 @@ jobs:
   close-issue:
     needs: [extract-issue-details, submit-extension, submit-update, post-comment]
     if: |
-      always() &&
+      !cancelled() &&
       needs.post-comment.result == 'success' &&
       (needs.submit-extension.outputs.should_close == 'true' ||
        needs.submit-update.outputs.should_close == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      issues: write
     steps:
       - name: Close issue
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
@@ -542,7 +558,7 @@ jobs:
   notify-zoom:
     needs: [extract-issue-details, submit-extension, submit-update]
     if: |
-      always() &&
+      !cancelled() &&
       (needs.submit-extension.outputs.zoom_payload != '' ||
        needs.submit-update.outputs.zoom_payload != '')
     uses: ./.github/workflows/common-notify-zoom.yml
