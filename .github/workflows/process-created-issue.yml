@@ -146,6 +146,7 @@ jobs:
           mode: enforce
           disable-sudo: 'true'
           disable-docker: 'true'
+          block-risky-github-subdomains: 'true'
 
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
