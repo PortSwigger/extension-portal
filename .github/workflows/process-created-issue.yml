@@ -240,8 +240,7 @@ jobs:
                   project: { key: "BAPP" },
                   summary: title,
                   issuetype: { id: "10278" },
-                  customfield_10932: process.env.NORMALIZED_URL,
-                  customfield_12030: "extensions-build-pipeline"
+                  customfield_13486: issueUrl
                 }
               })
             });
@@ -258,31 +257,10 @@ jobs:
 
             core.setOutput('jira_key', jiraKey);
             core.setOutput('jira_url', `${process.env.JIRA_BASE_URL}/browse/${jiraKey}`);
-
-            // Add remote link to GitHub issue
-            const linkResponse = await fetch(`${process.env.JIRA_BASE_URL}/rest/api/3/issue/${jiraKey}/remotelink`, {
-              method: 'POST',
-              headers: jiraHeaders,
-              body: JSON.stringify({
-                object: {
-                  url: issueUrl,
-                  title: `GitHub Issue #${context.issue.number}: ${title}`,
-                  icon: { url16x16: "https://github.githubassets.com/favicons/favicon.svg", title: "GitHub" }
-                }
-              })
-            });
-
-            if (!linkResponse.ok) {
-              const linkErrorText = await linkResponse.text();
-              core.warning(`Failed to add remote link: ${linkResponse.status} - ${linkErrorText}`);
-            } else {
-              core.debug('Added remote link to Jira ticket');
-            }
         env:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-          NORMALIZED_URL: ${{ steps.validate_repo.outputs.normalized_url }}
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
 
       - name: Generate GitHub App token
