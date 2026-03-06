@@ -425,18 +425,15 @@ jobs:
           script: |
             const title = process.env.TITLE;
             const jiraKey = process.env.JIRA_KEY;
-            const jiraBaseUrl = process.env.JIRA_BASE_URL;
             const validateError = process.env.VALIDATE_ERROR;
             const issueUrl = context.payload.issue.html_url;
-
-            const jiraUrl = jiraKey ? `${jiraBaseUrl}/browse/${jiraKey}` : null;
 
             const payload = {
               "Extension": title,
               "Issue": issueUrl,
               ...(validateError
                 ? { "Validation Error": `❌ ${validateError}` }
-                : { "Jira Ticket": jiraUrl || '❌ Not created' })
+                : { "Jira Ticket": jiraKey || '❌ Not created' })
             };
 
             // Base64 encode to prevent GitHub from masking the output
@@ -445,7 +442,6 @@ jobs:
         env:
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
           JIRA_KEY: ${{ steps.create_jira.outputs.jira_key }}
-          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
           VALIDATE_ERROR: ${{ needs.validate-extension.outputs.error_message }}
 
   submit-update:
