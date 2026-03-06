@@ -21,17 +21,11 @@ jobs:
     steps:
       - name: Check if comment is a reopen request
         id: check_comment
-        env:
-          COMMENT_BODY: ${{ github.event.comment.body }}
-        run: |
-          # Truncate to first 10 characters
-          COMMENT_PREFIX="${COMMENT_BODY:0:10}"
-
-          if [[ "$COMMENT_PREFIX" == "/reopen"* ]]; then
-            echo "is_reopen_request=true" >> $GITHUB_OUTPUT
-          else
-            echo "is_reopen_request=false" >> $GITHUB_OUTPUT
-          fi
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const body = context.payload.comment.body || '';
+            core.setOutput('is_reopen_request', body.trimStart().startsWith('/reopen').toString());
 
       - name: Generate GitHub App token
         id: generate_token
