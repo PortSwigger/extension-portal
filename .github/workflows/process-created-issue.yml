@@ -303,7 +303,6 @@ jobs:
             core.debug(`Created Jira ticket: ${jiraKey}`);
 
             core.setOutput('jira_key', jiraKey);
-            core.setOutput('jira_url', `${process.env.JIRA_BASE_URL}/browse/${jiraKey}`);
         env:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
@@ -425,9 +424,12 @@ jobs:
         with:
           script: |
             const title = process.env.TITLE;
-            const jiraUrl = process.env.JIRA_URL;
+            const jiraKey = process.env.JIRA_KEY;
+            const jiraBaseUrl = process.env.JIRA_BASE_URL;
             const validateError = process.env.VALIDATE_ERROR;
             const issueUrl = context.payload.issue.html_url;
+
+            const jiraUrl = jiraKey ? `${jiraBaseUrl}/browse/${jiraKey}` : null;
 
             const payload = {
               "Extension": title,
@@ -442,7 +444,8 @@ jobs:
             core.setOutput('payload', encodedPayload);
         env:
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
-          JIRA_URL: ${{ steps.create_jira.outputs.jira_url }}
+          JIRA_KEY: ${{ steps.create_jira.outputs.jira_key }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
           VALIDATE_ERROR: ${{ needs.validate-extension.outputs.error_message }}
 
   submit-update:
