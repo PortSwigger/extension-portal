@@ -79,7 +79,7 @@ jobs:
             );
             core.setOutput('product_compatibility', JSON.stringify(productCompatibility));
 
-      - name: Sanitize and validate inputs
+      - name: Sanitize inputs
         id: sanitize
         uses: PortSwigger/shared-workflows/sanitize-inputs@ff879d3c7b4476af5ed83d7d81438c7258217644 # v1.0.0
         with:
@@ -94,7 +94,8 @@ jobs:
     needs: extract-issue-details
     if: |
       !cancelled() &&
-      contains(github.event.issue.body, 'template:01-submit-extension')
+      contains(github.event.issue.body, 'template:01-submit-extension') &&
+      needs.extract-issue-details.outputs.error_message == ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -117,7 +118,6 @@ jobs:
 
       - name: Verify repository exists and is not a fork
         id: validate_repo
-        if: needs.extract-issue-details.outputs.error_message == ''
         run: |
           python3 .github/scripts/validate_repo.py
         env:
@@ -126,7 +126,7 @@ jobs:
 
       - name: Identify extension language
         id: extension_language
-        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_repo.outcome == 'success'
+        if: steps.validate_repo.outcome == 'success'
         run: |
           python3 .github/scripts/detect_language.py
         env:
