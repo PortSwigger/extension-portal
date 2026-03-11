@@ -22,12 +22,12 @@ jobs:
     permissions:
       contents: read
     outputs:
-      url: ${{ steps.extract.outputs.url }}
-      version_number: ${{ steps.extract.outputs.version_number }}
-      author: ${{ steps.extract.outputs.author }}
-      title: ${{ steps.extract.outputs.title }}
-      error_message: ${{ steps.extract.outputs.error_message }}
-      product_compatibility: ${{ steps.extract.outputs.product_compatibility }}
+      url: ${{ steps.sanitize.outputs.url }}
+      version_number: ${{ steps.sanitize.outputs.version_number }}
+      author: ${{ steps.sanitize.outputs.author }}
+      title: ${{ steps.sanitize.outputs.title }}
+      error_message: ${{ steps.sanitize.outputs.error_message }}
+      product_compatibility: ${{ steps.sanitize.outputs.product_compatibility }}
 
     steps:
       - name: Extract submission details
@@ -35,102 +35,67 @@ jobs:
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
-            try {
-              const body = context.payload.issue.body || '';
-              const EMPTY_RESPONSE = '_No response_';
+            const body = context.payload.issue.body || '';
+            const EMPTY_RESPONSE = '_No response_';
 
-              // Utility functions
-              const sanitizeText = (text, maxLength = 200) => {
-                if (!text) return '';
-                return text
-                  .replace(/[<>\"'`]/g, '')
-                  .replace(/[\r\n\t]/g, ' ')
-                  .replace(/[^\x20-\x7E]/g, '')
-                  .substring(0, maxLength)
-                  .trim();
-              };
+            const extractField = (pattern, defaultValue = null) => {
+              const match = body.match(pattern);
+              return match ? match[1].trim() : defaultValue;
+            };
 
-              const validateVersion = (version) => {
-                if (!version) return null;
-                const trimmed = version.trim();
-                if (!/^[0-9a-zA-Z.-]+$/.test(trimmed) || trimmed.length > 50) {
-                  throw new Error(`Invalid version format: "${trimmed}". Only alphanumeric characters, dots, and hyphens are allowed.`);
-                }
-                return trimmed;
-              };
-
-              const extractField = (pattern, defaultValue = null) => {
-                const match = body.match(pattern);
-                return match ? match[1].trim() : defaultValue;
-              };
-
-              const isFieldEmpty = (value) => !value || value === EMPTY_RESPONSE;
-
-              const missingFields = [];
-
-              // Extract common fields
-              const versionNumber = validateVersion(extractField(/### Version number\s+([^\n]+)/));
-              if (isFieldEmpty(versionNumber)) missingFields.push('Version number');
-
-              const title = sanitizeText(context.payload.issue.title, 200);
-              const author = sanitizeText(extractField(/### Author display name\s+([^\n]+)/), 100);
-
-              core.setOutput('version_number', versionNumber);
-              core.setOutput('title', title);
-              core.setOutput('author', author);
-
-              const GITHUB_REPO_URL_RE = /^https:\/\/github\.com\/[a-zA-Z0-9][a-zA-Z0-9-]{0,37}[a-zA-Z0-9]\/[a-zA-Z0-9_.-]{1,100}\/?$/;
-              const GITHUB_PR_URL_RE = /^https:\/\/github\.com\/[Pp]ort[Ss]wigger\/[a-zA-Z0-9_.-]{1,100}\/pull\/\d+\/?$/;
-
-              const validateUrl = (raw, pattern) => {
-                if (!raw || raw.length > 500) return null;
-                const trimmed = raw.trim();
-                return pattern.test(trimmed) ? trimmed : null;
-              };
-
-              let url;
-              if (body.includes('template:01-submit-extension')) {
-                const rawUrl = extractField(/### Extension URL\s+([^\s]+)/);
-                if (isFieldEmpty(rawUrl)) {
-                  missingFields.push('Extension URL');
-                } else {
-                  url = validateUrl(rawUrl, GITHUB_REPO_URL_RE);
-                  if (!url) throw new Error('Invalid Extension URL format. Expected: https://github.com/owner/repo');
-                }
-                if (isFieldEmpty(author)) missingFields.push('Author display name');
-              } else if (body.includes('template:02-submit-update')) {
-                const rawUrl = extractField(/### Pull request URL\s+([^\s]+)/);
-                if (isFieldEmpty(rawUrl)) {
-                  missingFields.push('Pull request URL');
-                } else {
-                  url = validateUrl(rawUrl, GITHUB_PR_URL_RE);
-                  if (!url) throw new Error('Invalid Pull Request URL format. Expected: https://github.com/PortSwigger/repo/pull/123');
-                }
-                // Author is optional for updates
-              }
-
-              core.setOutput('url', url ?? '');
-
-              // Extract product compatibility labels
-              const compatibilityOptions = ['Community', 'DAST', 'Burp AI'];
-              const productCompatibility = compatibilityOptions.filter(label =>
-                body.includes(`- [x] ${label}`) || body.includes(`- [X] ${label}`)
-              );
-              core.setOutput('product_compatibility', JSON.stringify(productCompatibility));
-
-              if (missingFields.length > 0) {
-                throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
-              }
-            } catch (error) {
-              core.setOutput('error_message', error.message);
-              throw error;
+            // Determine type
+            let type = '';
+            if (body.includes('template:01-submit-extension')) {
+              type = 'extension-submission';
+            } else if (body.includes('template:02-submit-update')) {
+              type = 'extension-update';
             }
+            core.setOutput('type', type);
+
+            // Extract raw title
+            core.setOutput('title', context.payload.issue.title || '');
+
+            // Extract raw author
+            const author = extractField(/### Author display name\s+([^\n]+)/) || '';
+            core.setOutput('author', author === EMPTY_RESPONSE ? '' : author);
+
+            // Extract raw URL
+            let url = '';
+            if (type === 'extension-submission') {
+              url = extractField(/### Extension URL\s+([^\s]+)/) || '';
+            } else if (type === 'extension-update') {
+              url = extractField(/### Pull request URL\s+([^\s]+)/) || '';
+            }
+            core.setOutput('url', url === EMPTY_RESPONSE ? '' : url);
+
+            // Extract raw version number
+            const versionNumber = extractField(/### Version number\s+([^\n]+)/) || '';
+            core.setOutput('version_number', versionNumber === EMPTY_RESPONSE ? '' : versionNumber);
+
+            // Extract product compatibility
+            const compatibilityOptions = ['Community', 'DAST', 'Burp AI'];
+            const productCompatibility = compatibilityOptions.filter(label =>
+              body.includes(`- [x] ${label}`) || body.includes(`- [X] ${label}`)
+            );
+            core.setOutput('product_compatibility', JSON.stringify(productCompatibility));
+
+      - name: Sanitize inputs
+        id: sanitize
+        uses: PortSwigger/shared-workflows/sanitize-inputs@ff879d3c7b4476af5ed83d7d81438c7258217644 # v1.0.0
+        with:
+          type: ${{ steps.extract.outputs.type }}
+          title: ${{ steps.extract.outputs.title }}
+          author: ${{ steps.extract.outputs.author }}
+          url: ${{ steps.extract.outputs.url }}
+          version_number: ${{ steps.extract.outputs.version_number }}
+          product_compatibility: ${{ steps.extract.outputs.product_compatibility }}
 
   validate-extension:
     needs: extract-issue-details
     if: |
       !cancelled() &&
-      contains(github.event.issue.body, 'template:01-submit-extension')
+      contains(github.event.issue.body, 'template:01-submit-extension') &&
+      needs.extract-issue-details.outputs.error_message == ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -153,7 +118,6 @@ jobs:
 
       - name: Verify repository exists and is not a fork
         id: validate_repo
-        if: needs.extract-issue-details.outputs.error_message == ''
         run: |
           python3 .github/scripts/validate_repo.py
         env:
@@ -162,7 +126,7 @@ jobs:
 
       - name: Identify extension language
         id: extension_language
-        if: needs.extract-issue-details.outputs.error_message == '' && steps.validate_repo.outcome == 'success'
+        if: steps.validate_repo.outcome == 'success'
         run: |
           python3 .github/scripts/detect_language.py
         env:
