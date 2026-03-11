@@ -81,7 +81,7 @@ jobs:
 
       - name: Sanitize inputs
         id: sanitize
-        uses: PortSwigger/shared-workflows/sanitize-inputs@ff879d3c7b4476af5ed83d7d81438c7258217644 # v1.0.0
+        uses: PortSwigger/shared-workflows/sanitize-inputs@2eb39704602a73650c912fc77871e568429b7c1e # v1.0.1
         with:
           type: ${{ steps.extract.outputs.type }}
           title: ${{ steps.extract.outputs.title }}
