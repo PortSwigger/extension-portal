@@ -155,7 +155,7 @@ jobs:
             fi
             echo "build_system=Gradle" >> $GITHUB_OUTPUT
           else
-            echo "error_message=No build system found. Please ensure your repository contains pom.xml (Maven) or build.gradle (Gradle)." >> $GITHUB_OUTPUT
+            echo "error_message=No build system found. Please ensure your repository contains pom.xml (Maven) or build.gradle (Gradle). If using Gradle, please ensure to include the wrapper." >> $GITHUB_OUTPUT
             echo "ERROR: Unable to detect Java build system (no pom.xml or build.gradle found)"
             echo "Please ensure your project uses Maven or Gradle"
             exit 1
