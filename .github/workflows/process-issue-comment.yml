@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Check if comment is a reopen request
         id: check_comment
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const body = context.payload.comment.body || '';
@@ -38,7 +38,7 @@ jobs:
       - name: Check if issue is archived
         id: check_archived
         if: steps.check_comment.outputs.is_reopen_request == 'true'
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ steps.generate_token.outputs.token }}
           script: |
@@ -93,7 +93,7 @@ jobs:
       - name: Prepare Zoom notification payload
         id: prepare_payload
         if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_archived.outputs.is_archived == 'true'
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const issueNumber = context.issue.number;
@@ -116,7 +116,7 @@ jobs:
       - name: Reopen issue
         id: reopen_success
         if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_archived.outputs.is_archived != 'true'
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             await github.rest.issues.update({
