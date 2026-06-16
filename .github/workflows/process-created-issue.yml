@@ -15,13 +15,14 @@ concurrency:
 jobs:
   extract-issue-details:
     if: |
-      contains(github.event.issue.body, 'template:01-submit-extension') ||
-      contains(github.event.issue.body, 'template:02-submit-update')
+      github.event.issue.type.name == 'Extension' ||
+      github.event.issue.type.name == 'Update'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     outputs:
+      type: ${{ steps.extract.outputs.type }}
       url: ${{ steps.sanitize.outputs.url }}
       version_number: ${{ steps.sanitize.outputs.version_number }}
       author: ${{ steps.sanitize.outputs.author }}
@@ -43,11 +44,12 @@ jobs:
               return match ? match[1].trim() : defaultValue;
             };
 
-            // Determine type
+            // Determine type from the GitHub issue type set by the form template.
+            const issueType = context.payload.issue.type && context.payload.issue.type.name;
             let type = '';
-            if (body.includes('template:01-submit-extension')) {
+            if (issueType === 'Extension') {
               type = 'extension-submission';
-            } else if (body.includes('template:02-submit-update')) {
+            } else if (issueType === 'Update') {
               type = 'extension-update';
             }
             core.setOutput('type', type);
@@ -94,8 +96,8 @@ jobs:
     needs: extract-issue-details
     if: |
       !cancelled() &&
-      (contains(github.event.issue.body, 'template:01-submit-extension') ||
-       contains(github.event.issue.body, 'template:02-submit-update')) &&
+      (needs.extract-issue-details.outputs.type == 'extension-submission' ||
+       needs.extract-issue-details.outputs.type == 'extension-update') &&
       needs.extract-issue-details.outputs.error_message == ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -120,7 +122,7 @@ jobs:
 
       - name: Verify repository exists and is not a fork
         id: validate_repo
-        if: contains(github.event.issue.body, 'template:01-submit-extension')
+        if: needs.extract-issue-details.outputs.type == 'extension-submission'
         run: |
           python3 .github/scripts/validate_repo.py
         env:
@@ -129,7 +131,7 @@ jobs:
 
       - name: Resolve source repository
         id: resolve_source
-        if: contains(github.event.issue.body, 'template:02-submit-update')
+        if: needs.extract-issue-details.outputs.type == 'extension-update'
         run: |
           python3 .github/scripts/resolve_source_repo.py
         env:
@@ -215,7 +217,7 @@ jobs:
     needs: [extract-issue-details, validate-submission]
     if: |
       !cancelled() &&
-      contains(github.event.issue.body, 'template:01-submit-extension')
+      needs.extract-issue-details.outputs.type == 'extension-submission'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -413,7 +415,7 @@ jobs:
     needs: [extract-issue-details, validate-submission]
     if: |
       !cancelled() &&
-      contains(github.event.issue.body, 'template:02-submit-update')
+      needs.extract-issue-details.outputs.type == 'extension-update'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
