@@ -607,6 +607,7 @@ jobs:
           script: |
             const extractError = process.env.EXTRACT_ERROR || '';
             const validateError = process.env.VALIDATE_ERROR || '';
+            const status = process.env.UPDATE_STATUS || '';
 
             // A matched-or-manual update is a success for the submitter; only a bad
             // submission (extraction or repository link validation) is rejected.
@@ -617,7 +618,9 @@ jobs:
             let shouldClose = false;
 
             if (jobSuccess) {
-              templateKey = 'update-submission.success';
+              templateKey = status === 'automated'
+                ? 'update-submission.success'
+                : 'update-submission.manual';
             } else {
               const specificError = extractError || validateError;
               templateKey = specificError
@@ -638,6 +641,7 @@ jobs:
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
           VALIDATE_ERROR: ${{ needs.validate-submission.outputs.error_message }}
+          UPDATE_STATUS: ${{ steps.create_jira.outputs.status }}
 
   post-comment:
     needs: [extract-issue-details, submit-extension, submit-update]
