@@ -457,9 +457,11 @@ jobs:
                 'Accept': 'application/json'
               };
 
+              const escapeJql = (value) => (value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
               // Find the parent BAPP ticket by its "bapp url" field (customfield_10932).
               const searchJql = async (operator) => {
-                const jql = `project = BAPP AND issuetype = 10278 AND cf[10932] ${operator} "${sourceUrl}"`;
+                const jql = `project = BAPP AND issuetype = 10278 AND cf[10932] ${operator} "${escapeJql(sourceUrl)}"`;
                 return fetch(`${process.env.JIRA_BASE_URL}/rest/api/3/search/jql`, {
                   method: 'POST',
                   headers: jiraHeaders,

@@ -17,7 +17,7 @@ from github_actions_utils import set_output
 
 def extract_owner_repo(url):
     """Extract owner and repo from a GitHub URL (ignores any trailing path such as /pull/123)"""
-    match = re.match(r'(?:https://)?(?:www\.)?github\.com/([^/]+)/([^/]+)', url)
+    match = re.match(r'(?:https://)?(?:www\.)?github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)', url)
     if not match:
         raise ValueError(f"Could not extract owner/repo from URL: {url}")
 
