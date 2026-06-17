@@ -46,7 +46,9 @@
       "",
       "**Error:** {{ERROR_MESSAGE}}",
       "",
-      "Please correct the issue and submit a new request."
+      "---",
+      "",
+      "Once you've resolved the above, simply make a comment starting with `/reopen` and we'll put your update back into the review process."
     ],
     "failure-generic": [
       "❌ Update submission failed.",
