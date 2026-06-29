@@ -169,12 +169,16 @@ jobs:
           script: |
             const validateOutcome = process.env.VALIDATE_OUTCOME;
             const validateError = process.env.VALIDATE_ERROR;
+            const languageOutcome = process.env.LANGUAGE_OUTCOME;
+            const languageError = process.env.LANGUAGE_ERROR;
             const buildOutcome = process.env.BUILD_OUTCOME;
             const buildError = process.env.BUILD_ERROR;
 
             let message = '';
             if (validateOutcome === 'failure') {
               message = validateError || 'Repository validation failed. The repository may be a fork or not accessible.';
+            } else if (languageOutcome === 'failure') {
+              message = languageError || 'No supported source code (Java, Kotlin, Python, or Ruby) was found in the repository. Your repository must contain the source code of your extension.';
             } else if (buildOutcome === 'failure') {
               message = buildError || 'Build system validation failed. Please ensure your repository contains a valid Maven or Gradle build configuration.';
             }
@@ -183,6 +187,8 @@ jobs:
         env:
           VALIDATE_OUTCOME: ${{ steps.validate_repo.outcome }}
           VALIDATE_ERROR: ${{ steps.validate_repo.outputs.error_message }}
+          LANGUAGE_OUTCOME: ${{ steps.extension_language.outcome }}
+          LANGUAGE_ERROR: ${{ steps.extension_language.outputs.error_message }}
           BUILD_OUTCOME: ${{ steps.build_platform.outcome }}
           BUILD_ERROR: ${{ steps.build_platform.outputs.error_message }}
 

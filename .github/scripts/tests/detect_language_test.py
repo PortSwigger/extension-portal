@@ -224,8 +224,7 @@ class TestMain(unittest.TestCase):
 
     @patch('detect_language.detect_language')
     @patch('detect_language.set_output')
-    @patch('sys.argv', ['detect_language.py', 'https://github.com/owner/repo'])
-    @patch.dict('os.environ', {'GITHUB_TOKEN': 'test_token'})
+    @patch.dict('os.environ', {'URL': 'https://github.com/owner/repo', 'GITHUB_TOKEN': 'test_token'})
     def test_main_success(self, mock_set_output, mock_detect):
         mock_detect.return_value = 'Java'
 
@@ -237,8 +236,7 @@ class TestMain(unittest.TestCase):
 
     @patch('detect_language.detect_language')
     @patch('detect_language.set_output')
-    @patch('sys.argv', ['detect_language.py', 'https://github.com/owner/repo'])
-    @patch.dict('os.environ', {}, clear=True)
+    @patch.dict('os.environ', {'URL': 'https://github.com/owner/repo'}, clear=True)
     def test_main_without_token(self, mock_set_output, mock_detect):
         mock_detect.return_value = 'Python'
 
@@ -247,19 +245,35 @@ class TestMain(unittest.TestCase):
 
         mock_detect.assert_called_once_with('https://github.com/owner/repo', None)
 
+    @patch('detect_language.detect_language')
     @patch('detect_language.set_output')
-    @patch('sys.argv', ['detect_language.py'])
+    @patch.dict('os.environ', {'URL': 'https://github.com/owner/repo'}, clear=True)
+    def test_main_unknown_language_rejected(self, mock_set_output, mock_detect):
+        mock_detect.return_value = 'Unknown'
+
+        with self.assertRaises(SystemExit) as cm:
+            with patch('sys.stderr', new=StringIO()):
+                detect_language.main()
+
+        self.assertEqual(cm.exception.code, 1)
+        mock_set_output.assert_called_once()
+        key, value = mock_set_output.call_args.args
+        self.assertEqual(key, 'error_message')
+        self.assertIn('must contain the source code', value)
+
+    @patch('detect_language.set_output')
+    @patch.dict('os.environ', {}, clear=True)
     def test_main_missing_url(self, mock_set_output):
         with self.assertRaises(SystemExit) as cm:
             with patch('sys.stderr', new=StringIO()):
                 detect_language.main()
 
         self.assertEqual(cm.exception.code, 1)
-        mock_set_output.assert_called_once_with('error_message', 'Repository URL is required')
+        mock_set_output.assert_called_once_with('error_message', 'URL environment variable is required')
 
     @patch('detect_language.detect_language')
     @patch('detect_language.set_output')
-    @patch('sys.argv', ['detect_language.py', 'https://github.com/owner/repo'])
+    @patch.dict('os.environ', {'URL': 'https://github.com/owner/repo'}, clear=True)
     def test_main_detect_language_error(self, mock_set_output, mock_detect):
         mock_detect.side_effect = ValueError('GitHub repository not found: owner/repo')
 

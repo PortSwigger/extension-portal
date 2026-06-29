@@ -101,6 +101,17 @@ def main():
     try:
         github_token = os.environ.get('GITHUB_TOKEN')
         language = detect_language(url, github_token)
+
+        if language == "Unknown":
+            error_msg = (
+                "No supported source code was found in the repository. "
+                "Your repository must contain the source code of your extension, "
+                "written in Java, Kotlin, Python, or Ruby."
+            )
+            print(f'::error::{error_msg}', file=sys.stderr)
+            set_output('error_message', error_msg)
+            sys.exit(1)
+
         set_output('language', language)
     except Exception as e:
         error_msg = str(e)
