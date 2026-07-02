@@ -115,10 +115,3 @@ body:
   attributes:
     label: Usage instructions
     description: Step-by-step instructions for using your extension.
-
-- type: checkboxes
-  id: template_identifier
-  attributes:
-    label: "Template identifier (Internal use only - please ignore)"
-    options:
-      - label: "template:01-submit-extension"

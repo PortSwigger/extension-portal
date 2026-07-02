@@ -90,10 +90,3 @@ body:
       1. First step to use the extension...
       2. Second step...
       3. Third step...
-
-- type: checkboxes
-  id: template_identifier
-  attributes:
-    label: "Template identifier (Internal use only - please ignore)"
-    options:
-      - label: "template:02-submit-update"

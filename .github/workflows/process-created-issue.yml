@@ -15,13 +15,14 @@ concurrency:
 jobs:
   extract-issue-details:
     if: |
-      contains(github.event.issue.body, 'template:01-submit-extension') ||
-      contains(github.event.issue.body, 'template:02-submit-update')
+      github.event.issue.type.name == 'Extension' ||
+      github.event.issue.type.name == 'Update'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     outputs:
+      type: ${{ steps.extract.outputs.type }}
       url: ${{ steps.sanitize.outputs.url }}
       version_number: ${{ steps.sanitize.outputs.version_number }}
       author: ${{ steps.sanitize.outputs.author }}
@@ -43,11 +44,12 @@ jobs:
               return match ? match[1].trim() : defaultValue;
             };
 
-            // Determine type
+            // Determine type from the GitHub issue type set by the form template.
+            const issueType = context.payload.issue.type && context.payload.issue.type.name;
             let type = '';
-            if (body.includes('template:01-submit-extension')) {
+            if (issueType === 'Extension') {
               type = 'extension-submission';
-            } else if (body.includes('template:02-submit-update')) {
+            } else if (issueType === 'Update') {
               type = 'extension-update';
             }
             core.setOutput('type', type);
@@ -90,11 +92,12 @@ jobs:
           version_number: ${{ steps.extract.outputs.version_number }}
           product_compatibility: ${{ steps.extract.outputs.product_compatibility }}
 
-  validate-extension:
+  validate-submission:
     needs: extract-issue-details
     if: |
       !cancelled() &&
-      contains(github.event.issue.body, 'template:01-submit-extension') &&
+      (needs.extract-issue-details.outputs.type == 'extension-submission' ||
+       needs.extract-issue-details.outputs.type == 'extension-update') &&
       needs.extract-issue-details.outputs.error_message == ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -102,7 +105,8 @@ jobs:
       contents: read
     outputs:
       error_message: ${{ steps.summarise.outputs.error_message }}
-      normalized_url: ${{ steps.validate_repo.outputs.normalized_url }}
+      normalized_url: ${{ steps.summarise.outputs.normalized_url }}
+      source_repo_url: ${{ steps.summarise.outputs.source_repo_url }}
 
     steps:
       - name: Harden runner
@@ -118,8 +122,18 @@ jobs:
 
       - name: Verify repository exists and is not a fork
         id: validate_repo
+        if: needs.extract-issue-details.outputs.type == 'extension-submission'
         run: |
           python3 .github/scripts/validate_repo.py
+        env:
+          URL: ${{ needs.extract-issue-details.outputs.url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve source repository
+        id: resolve_source
+        if: needs.extract-issue-details.outputs.type == 'extension-update'
+        run: |
+          python3 .github/scripts/resolve_source_repo.py
         env:
           URL: ${{ needs.extract-issue-details.outputs.url }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -173,6 +187,8 @@ jobs:
             const languageError = process.env.LANGUAGE_ERROR;
             const buildOutcome = process.env.BUILD_OUTCOME;
             const buildError = process.env.BUILD_ERROR;
+            const resolveOutcome = process.env.RESOLVE_OUTCOME;
+            const resolveError = process.env.RESOLVE_ERROR;
 
             let message = '';
             if (validateOutcome === 'failure') {
@@ -181,9 +197,16 @@ jobs:
               message = languageError || 'No supported source code (Java, Kotlin, Python, or Ruby) was found in the repository. Your repository must contain the source code of your extension.';
             } else if (buildOutcome === 'failure') {
               message = buildError || 'Build system validation failed. Please ensure your repository contains a valid Maven or Gradle build configuration.';
+            } else if (resolveOutcome === 'failure') {
+              message = resolveError || 'Could not resolve the source repository from the pull request URL.';
             }
 
             core.setOutput('error_message', message);
+            // Submissions normalize the extension repository URL; updates resolve the source
+            // repository (the fork's parent, or the repository itself if PortSwigger-owned)
+            // used to find the parent ticket.
+            core.setOutput('normalized_url', process.env.VALIDATE_URL || '');
+            core.setOutput('source_repo_url', process.env.RESOLVE_URL || '');
         env:
           VALIDATE_OUTCOME: ${{ steps.validate_repo.outcome }}
           VALIDATE_ERROR: ${{ steps.validate_repo.outputs.error_message }}
@@ -191,12 +214,16 @@ jobs:
           LANGUAGE_ERROR: ${{ steps.extension_language.outputs.error_message }}
           BUILD_OUTCOME: ${{ steps.build_platform.outcome }}
           BUILD_ERROR: ${{ steps.build_platform.outputs.error_message }}
+          RESOLVE_OUTCOME: ${{ steps.resolve_source.outcome }}
+          RESOLVE_ERROR: ${{ steps.resolve_source.outputs.error_message }}
+          VALIDATE_URL: ${{ steps.validate_repo.outputs.normalized_url }}
+          RESOLVE_URL: ${{ steps.resolve_source.outputs.normalized_url }}
 
   submit-extension:
-    needs: [extract-issue-details, validate-extension]
+    needs: [extract-issue-details, validate-submission]
     if: |
       !cancelled() &&
-      contains(github.event.issue.body, 'template:01-submit-extension')
+      needs.extract-issue-details.outputs.type == 'extension-submission'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -238,7 +265,7 @@ jobs:
         id: create_jira
         if: |
           needs.extract-issue-details.outputs.error_message == '' &&
-          needs.validate-extension.outputs.error_message == ''
+          needs.validate-submission.outputs.error_message == ''
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
@@ -279,19 +306,9 @@ jobs:
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
 
-      - name: Generate GitHub App token
-        id: generate_token
-        if: steps.create_jira.outcome == 'success'
-        continue-on-error: true
-        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
-        with:
-          app-id: ${{ secrets.PROJECT_ACCESS_APP_ID }}
-          private-key: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
-          repositories: extension-portal-internal
-
       - name: Convert product compatibility format
         id: convert_products
-        if: steps.generate_token.outcome == 'success'
+        if: steps.create_jira.outcome == 'success'
         continue-on-error: true
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
@@ -316,40 +333,24 @@ jobs:
         env:
           PRODUCT_COMPATIBILITY: ${{ needs.extract-issue-details.outputs.product_compatibility }}
 
+      - name: Checkout repository
+        if: steps.convert_products.outcome == 'success'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
       - name: Trigger review workflow
         id: review_workflow
         if: steps.convert_products.outcome == 'success'
         continue-on-error: true
-        env:
-          OWNER: PortSwigger
-          REPO: extension-portal-internal
-          WORKFLOW_FILE: sanitize-and-analyze.yml
-          REF: main
-          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
-          EXTENSION_NAME: ${{ needs.extract-issue-details.outputs.title }}
-          TARGET_REPO_URL: ${{ needs.validate-extension.outputs.normalized_url }}
-          COMPATIBLE_PRODUCTS: ${{ steps.convert_products.outputs.products }}
-          JIRA_TICKET: ${{ steps.create_jira.outputs.jira_key }}
-          ISSUE_URL: ${{ github.event.issue.html_url }}
-        run: |
-          # Build JSON payload using jq to safely escape all values
-          payload=$(jq -n \
-            --arg ref "$REF" \
-            --arg extension_name "$EXTENSION_NAME" \
-            --arg target_repo_url "$TARGET_REPO_URL" \
-            --arg compatible_products "$COMPATIBLE_PRODUCTS" \
-            --arg jira_ticket "$JIRA_TICKET" \
-            --arg issue_url "$ISSUE_URL" \
-            '{"ref": $ref, "inputs": {"extension_name": $extension_name, "target_repo_url": $target_repo_url, "compatible_products": $compatible_products, "jira_ticket": $jira_ticket, "issue_url": $issue_url}}')
-
-          curl -sS -f -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Content-Type: application/json" \
-            https://api.github.com/repos/$OWNER/$REPO/actions/workflows/$WORKFLOW_FILE/dispatches \
-            -d "$payload"
-
-          echo "Workflow dispatch triggered successfully"
+        uses: ./.github/actions/trigger-review
+        with:
+          app_id: ${{ secrets.PROJECT_ACCESS_APP_ID }}
+          private_key: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
+          extension_name: ${{ needs.extract-issue-details.outputs.title }}
+          target_repo_url: ${{ needs.validate-submission.outputs.normalized_url }}
+          compatible_products: ${{ steps.convert_products.outputs.products }}
+          jira_ticket: ${{ steps.create_jira.outputs.jira_key }}
+          issue_url: ${{ github.event.issue.html_url }}
+          is_update: 'false'
 
       - name: Prepare comment data
         id: prepare_comment
@@ -386,7 +387,7 @@ jobs:
             core.setOutput('has_comment', 'true');
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
-          VALIDATE_ERROR: ${{ needs.validate-extension.outputs.error_message }}
+          VALIDATE_ERROR: ${{ needs.validate-submission.outputs.error_message }}
           CREATE_JIRA_OUTCOME: ${{ steps.create_jira.outcome }}
 
       - name: Prepare Zoom notification payload
@@ -414,13 +415,13 @@ jobs:
         env:
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
           JIRA_KEY: ${{ steps.create_jira.outputs.jira_key }}
-          VALIDATE_ERROR: ${{ needs.validate-extension.outputs.error_message }}
+          VALIDATE_ERROR: ${{ needs.validate-submission.outputs.error_message }}
 
   submit-update:
-    needs: extract-issue-details
+    needs: [extract-issue-details, validate-submission]
     if: |
       !cancelled() &&
-      contains(github.event.issue.body, 'template:02-submit-update')
+      needs.extract-issue-details.outputs.type == 'extension-update'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -431,6 +432,128 @@ jobs:
       has_comment: ${{ steps.prepare_comment.outputs.has_comment }}
 
     steps:
+      - name: Create Jira ticket
+        id: create_jira
+        if: |
+          needs.extract-issue-details.outputs.error_message == '' &&
+          needs.validate-submission.outputs.error_message == ''
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const sourceUrl = process.env.SOURCE_URL || '';
+            const prUrl = process.env.PR_URL || '';
+            const version = (process.env.VERSION_NUMBER || '').trim();
+            const issueUrl = context.payload.issue.html_url;
+
+            // The parent ticket and subtask are created automatically only when there is
+            // exactly one matching parent. Anything else (no match, ambiguous match, or a
+            // Jira error) falls back to manual intervention: the team is alerted via Zoom
+            // and creates the ticket by hand, so this step never fails the submission.
+            const fallToManual = (reason) => {
+              core.warning(reason);
+              core.setOutput('status', 'manual');
+              core.setOutput('reason', reason);
+            };
+
+            try {
+              const jiraAuth = Buffer.from(`${process.env.JIRA_USER_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
+              const jiraHeaders = {
+                'Authorization': `Basic ${jiraAuth}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+              };
+
+              const escapeJql = (value) => (value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+              // Find the parent BAPP ticket by its "bapp url" field (customfield_10932).
+              const searchJql = async (operator) => {
+                const jql = `project = BAPP AND issuetype = 10278 AND cf[10932] ${operator} "${escapeJql(sourceUrl)}"`;
+                return fetch(`${process.env.JIRA_BASE_URL}/rest/api/3/search/jql`, {
+                  method: 'POST',
+                  headers: jiraHeaders,
+                  body: JSON.stringify({ jql, fields: ['customfield_10932'], maxResults: 50 })
+                });
+              };
+
+              // Prefer the "contains" operator; fall back to exact match if the field rejects it.
+              let searchResponse = await searchJql('~');
+              if (searchResponse.status === 400) {
+                searchResponse = await searchJql('=');
+              }
+              if (!searchResponse.ok) {
+                return fallToManual(`Jira search for the parent ticket failed: ${searchResponse.status}`);
+              }
+              const searchData = await searchResponse.json();
+              const issues = searchData.issues || [];
+
+              // Exact-match the bapp url field to guard against fuzzy "~" matches.
+              const normalize = (value) => (value || '').trim().replace(/\.git$/, '').replace(/\/+$/, '').toLowerCase();
+              const target = normalize(sourceUrl);
+              const matches = issues.filter(issue => normalize(issue.fields && issue.fields.customfield_10932) === target);
+
+              if (matches.length === 0) {
+                return fallToManual(`No parent BAPP ticket found with bapp url ${sourceUrl}.`);
+              }
+              if (matches.length > 1) {
+                return fallToManual(`Multiple parent BAPP tickets found (${matches.map(i => i.key).join(', ')}) for bapp url ${sourceUrl}.`);
+              }
+              const parentKey = matches[0].key;
+              core.info(`Parent BAPP ticket: ${parentKey}`);
+
+              // Create the "BApp update" subtask under the parent ticket.
+              const createResponse = await fetch(`${process.env.JIRA_BASE_URL}/rest/api/3/issue`, {
+                method: 'POST',
+                headers: jiraHeaders,
+                body: JSON.stringify({
+                  fields: {
+                    project: { key: "BAPP" },
+                    parent: { key: parentKey },
+                    summary: `v${version}`,
+                    issuetype: { id: "10279" },
+                    customfield_10932: prUrl,
+                    customfield_13486: issueUrl
+                  }
+                })
+              });
+
+              if (!createResponse.ok) {
+                const errorText = await createResponse.text();
+                return fallToManual(`Failed to create BApp update subtask: ${createResponse.status} ${errorText}`);
+              }
+
+              const subtask = await createResponse.json();
+              core.info(`Created BApp update subtask: ${subtask.key}`);
+              core.setOutput('status', 'automated');
+              core.setOutput('jira_key', subtask.key);
+            } catch (error) {
+              fallToManual(`Unexpected error while creating the update ticket: ${error.message}`);
+            }
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          SOURCE_URL: ${{ needs.validate-submission.outputs.source_repo_url }}
+          PR_URL: ${{ needs.extract-issue-details.outputs.url }}
+          VERSION_NUMBER: ${{ needs.extract-issue-details.outputs.version_number }}
+
+      - name: Checkout repository
+        if: steps.create_jira.outputs.status == 'automated'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Trigger review workflow
+        id: review_workflow
+        if: steps.create_jira.outputs.status == 'automated'
+        continue-on-error: true
+        uses: ./.github/actions/trigger-review
+        with:
+          app_id: ${{ secrets.PROJECT_ACCESS_APP_ID }}
+          private_key: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
+          extension_name: ${{ needs.extract-issue-details.outputs.title }}
+          target_repo_url: ${{ needs.extract-issue-details.outputs.url }}
+          jira_ticket: ${{ steps.create_jira.outputs.jira_key }}
+          issue_url: ${{ github.event.issue.html_url }}
+          is_update: 'true'
+
       - name: Prepare Zoom notification payload
         id: prepare_zoom
         if: needs.extract-issue-details.outputs.error_message == ''
@@ -441,14 +564,33 @@ jobs:
             const prUrl = process.env.URL;
             const versionNumber = process.env.VERSION_NUMBER;
             const issueUrl = context.payload.issue.html_url;
+            const validateError = process.env.VALIDATE_ERROR;
+            const status = process.env.UPDATE_STATUS;
+            const jiraKey = process.env.JIRA_KEY;
+            const reason = process.env.UPDATE_REASON;
+            const reviewOutcome = process.env.REVIEW_OUTCOME;
 
             const payload = {
               "Extension": title,
               "Version": versionNumber,
               "PR": prUrl,
-              "Issue": issueUrl,
-              "Action": "⚠️ Create associated update ticket."
+              "Issue": issueUrl
             };
+
+            if (validateError) {
+              // Repository link validation failed - the submission is rejected.
+              payload["Validation Error"] = `❌ ${validateError}`;
+            } else if (status === 'automated') {
+              // Subtask created and review kicked off automatically.
+              payload["Update Ticket"] = jiraKey;
+              payload["Review"] = reviewOutcome === 'success' ? '✅ Triggered' : '⚠️ Not triggered - investigate';
+            } else {
+              // No single parent ticket matched - fall back to manual intervention.
+              payload["Action"] = "⚠️ Create associated update ticket.";
+              if (reason) {
+                payload["Reason"] = reason;
+              }
+            }
 
             // Base64 encode to prevent GitHub from masking the output
             const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64');
@@ -457,6 +599,11 @@ jobs:
           URL: ${{ needs.extract-issue-details.outputs.url }}
           VERSION_NUMBER: ${{ needs.extract-issue-details.outputs.version_number }}
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
+          VALIDATE_ERROR: ${{ needs.validate-submission.outputs.error_message }}
+          UPDATE_STATUS: ${{ steps.create_jira.outputs.status }}
+          JIRA_KEY: ${{ steps.create_jira.outputs.jira_key }}
+          UPDATE_REASON: ${{ steps.create_jira.outputs.reason }}
+          REVIEW_OUTCOME: ${{ steps.review_workflow.outcome }}
 
       - name: Prepare comment data
         id: prepare_comment
@@ -465,18 +612,23 @@ jobs:
         with:
           script: |
             const extractError = process.env.EXTRACT_ERROR || '';
+            const validateError = process.env.VALIDATE_ERROR || '';
+            const status = process.env.UPDATE_STATUS || '';
 
-            // Job is successful if there are no errors
-            const jobSuccess = !extractError;
+            // A matched-or-manual update is a success for the submitter; only a bad
+            // submission (extraction or repository link validation) is rejected.
+            const jobSuccess = !extractError && !validateError;
 
             let templateKey;
             let errorMessage = '';
             let shouldClose = false;
 
             if (jobSuccess) {
-              templateKey = 'update-submission.success';
+              templateKey = status === 'automated'
+                ? 'update-submission.success'
+                : 'update-submission.manual';
             } else {
-              const specificError = extractError;
+              const specificError = extractError || validateError;
               templateKey = specificError
                 ? 'update-submission.failure-specific'
                 : 'update-submission.failure-generic';
@@ -494,6 +646,8 @@ jobs:
             core.setOutput('has_comment', 'true');
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
+          VALIDATE_ERROR: ${{ needs.validate-submission.outputs.error_message }}
+          UPDATE_STATUS: ${{ steps.create_jira.outputs.status }}
 
   post-comment:
     needs: [extract-issue-details, submit-extension, submit-update]
