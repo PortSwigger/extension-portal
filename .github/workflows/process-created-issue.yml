@@ -3,6 +3,7 @@ name: Process created issue
 on:
   issues:
     types: [opened]
+  workflow_call:
 
 permissions:
   issues: write

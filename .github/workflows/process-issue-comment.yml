@@ -1,4 +1,9 @@
-name: Allow Issue Creator to Reopen
+name: Process issue comment commands
+
+# Routes slash commands posted as issue comments:
+#   /reopen   - reopens a closed issue (restoring archived ones via the team).
+#   /resubmit - re-runs the automated submission pipeline after a repo-specific
+#               rejection, unless a submission already succeeded.
 
 on:
   issue_comment:
@@ -8,9 +13,16 @@ permissions:
   issues: write
   contents: read
 
+concurrency:
+  group: issue-comment-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   reopen-issue:
-    if: github.event.issue.state == 'closed'
+    if: |
+      github.event.issue.pull_request == null &&
+      github.event.issue.state == 'closed' &&
+      startsWith(github.event.comment.body, '/reopen')
     runs-on: ubuntu-latest
     outputs:
       zoom_payload: ${{ steps.prepare_payload.outputs.payload }}
@@ -19,17 +31,8 @@ jobs:
       should_post_comment: ${{ steps.check_archived.outputs.template_key != '' || steps.reopen_success.outputs.template_key != '' }}
 
     steps:
-      - name: Check if comment is a reopen request
-        id: check_comment
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const body = context.payload.comment.body || '';
-            core.setOutput('is_reopen_request', body.trimStart().startsWith('/reopen').toString());
-
       - name: Generate GitHub App token
         id: generate_token
-        if: steps.check_comment.outputs.is_reopen_request == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.PROJECT_ACCESS_APP_ID }}
@@ -37,7 +40,6 @@ jobs:
 
       - name: Check if issue is archived
         id: check_archived
-        if: steps.check_comment.outputs.is_reopen_request == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ steps.generate_token.outputs.token }}
@@ -92,7 +94,7 @@ jobs:
 
       - name: Prepare Zoom notification payload
         id: prepare_payload
-        if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_archived.outputs.is_archived == 'true'
+        if: steps.check_archived.outputs.is_archived == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
@@ -115,7 +117,7 @@ jobs:
 
       - name: Reopen issue
         id: reopen_success
-        if: steps.check_comment.outputs.is_reopen_request == 'true' && steps.check_archived.outputs.is_archived != 'true'
+        if: steps.check_archived.outputs.is_archived != 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
@@ -146,3 +148,233 @@ jobs:
     with:
       issue_number: ${{ github.event.issue.number }}
       template_key: ${{ needs.reopen-issue.outputs.template_key }}
+
+  resubmit-issue:
+    if: |
+      github.event.issue.pull_request == null &&
+      startsWith(github.event.comment.body, '/resubmit')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      proceed: ${{ steps.decide.outputs.proceed }}
+      template_key: ${{ steps.decide.outputs.template_key }}
+
+    steps:
+      - name: Decide whether to resubmit
+        id: decide
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const comment = context.payload.comment;
+
+            const refuse = (templateKey, reason) => {
+              core.info(reason);
+              core.setOutput('proceed', 'false');
+              core.setOutput('template_key', templateKey);
+            };
+
+            // 1. Authorisation: the original submitter or a maintainer.
+            const isAuthor = comment.user.login === issue.user.login;
+            const isMaintainer = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(comment.author_association);
+            if (!isAuthor && !isMaintainer) {
+              return refuse('resubmit.not-authorized', `${comment.user.login} is not authorised to resubmit.`);
+            }
+
+            // 2. Must be an extension submission (the "Extension" GitHub issue type).
+            const issueType = issue.type && issue.type.name;
+            if (issueType !== 'Extension') {
+              return refuse('resubmit.not-eligible', `Issue type "${issueType}" is not a resubmittable extension submission.`);
+            }
+
+            // 3. Refuse if a BAPP ticket already exists for this issue - that means a
+            //    previous run succeeded, and resubmitting would create a duplicate.
+            //    Submission tickets record the GitHub issue URL in customfield_13486.
+            const issueUrl = issue.html_url;
+            const jiraAuth = Buffer.from(`${process.env.JIRA_USER_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
+            const jiraHeaders = {
+              'Authorization': `Basic ${jiraAuth}`,
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            };
+
+            const escapeJql = (value) => (value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            const searchJql = async (operator) => {
+              const jql = `project = BAPP AND issuetype = 10278 AND cf[13486] ${operator} "${escapeJql(issueUrl)}"`;
+              return fetch(`${process.env.JIRA_BASE_URL}/rest/api/3/search/jql`, {
+                method: 'POST',
+                headers: jiraHeaders,
+                body: JSON.stringify({ jql, fields: ['customfield_13486'], maxResults: 50 })
+              });
+            };
+
+            // Prefer the "contains" operator; fall back to exact match if the field rejects it.
+            let searchResponse = await searchJql('~');
+            if (searchResponse.status === 400) {
+              searchResponse = await searchJql('=');
+            }
+            if (!searchResponse.ok) {
+              // Fail safe: if we cannot confirm the ticket state, do not risk a duplicate.
+              return refuse('resubmit.lookup-failed', `Jira lookup failed: ${searchResponse.status}.`);
+            }
+
+            const searchData = await searchResponse.json();
+            const foundIssues = searchData.issues || [];
+
+            // Exact-match the issue URL to guard against fuzzy "~" matches.
+            const normalize = (value) => (value || '').trim().replace(/\/+$/, '').toLowerCase();
+            const target = normalize(issueUrl);
+            const alreadySubmitted = foundIssues.some(
+              i => normalize(i.fields && i.fields.customfield_13486) === target
+            );
+            if (alreadySubmitted) {
+              return refuse('resubmit.already-processed', 'A BAPP ticket already exists for this issue.');
+            }
+
+            core.info('Resubmission approved.');
+            core.setOutput('proceed', 'true');
+            core.setOutput('template_key', '');
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+
+  resubmit-reject-comment:
+    needs: resubmit-issue
+    if: needs.resubmit-issue.outputs.proceed == 'false' && needs.resubmit-issue.outputs.template_key != ''
+    uses: ./.github/workflows/common-post-issue-comment.yml
+    with:
+      issue_number: ${{ github.event.issue.number }}
+      template_key: ${{ needs.resubmit-issue.outputs.template_key }}
+
+  resubmit-reopen:
+    needs: resubmit-issue
+    if: needs.resubmit-issue.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Ensure issue is open for reprocessing
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'open'
+            });
+            core.info('Issue is open for resubmission.');
+
+      - name: Generate GitHub App token
+        id: generate_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.PROJECT_ACCESS_APP_ID }}
+          private-key: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
+
+      - name: Move issue to Concept review column
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ steps.generate_token.outputs.token }}
+          script: |
+            const PROJECT_NUMBER = 1;
+            const TARGET_COLUMN = 'Concept review';
+            try {
+              // Resolve the project's Status field and the target column's option id.
+              const projectData = await github.graphql(`
+                query($org: String!, $number: Int!) {
+                  organization(login: $org) {
+                    projectV2(number: $number) {
+                      id
+                      field(name: "Status") {
+                        ... on ProjectV2SingleSelectField {
+                          id
+                          options { id name }
+                        }
+                      }
+                    }
+                  }
+                }
+              `, { org: context.repo.owner, number: PROJECT_NUMBER });
+
+              const project = projectData.organization.projectV2;
+              const statusField = project.field;
+              const option = statusField.options.find(
+                o => o.name.toLowerCase() === TARGET_COLUMN.toLowerCase()
+              );
+              if (!option) {
+                core.warning(`Column "${TARGET_COLUMN}" not found on project #${PROJECT_NUMBER}.`);
+                return;
+              }
+
+              // Find the existing project item for this issue, if any.
+              const itemData = await github.graphql(`
+                query($issueId: ID!) {
+                  node(id: $issueId) {
+                    ... on Issue {
+                      projectItems(first: 10) {
+                        nodes {
+                          id
+                          isArchived
+                          project { ... on ProjectV2 { number } }
+                        }
+                      }
+                    }
+                  }
+                }
+              `, { issueId: context.payload.issue.node_id });
+
+              let item = itemData.node.projectItems.nodes.find(
+                i => i.project.number === PROJECT_NUMBER
+              );
+
+              if (!item) {
+                // Removed from the board - re-add it (a new item, fields reset).
+                const added = await github.graphql(`
+                  mutation($projectId: ID!, $contentId: ID!) {
+                    addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                      item { id }
+                    }
+                  }
+                `, { projectId: project.id, contentId: context.payload.issue.node_id });
+                item = { id: added.addProjectV2ItemById.item.id };
+                core.info('Re-added issue to the project board.');
+              } else if (item.isArchived) {
+                // Archived - unarchive so it shows in the board views again.
+                await github.graphql(`
+                  mutation($projectId: ID!, $itemId: ID!) {
+                    unarchiveProjectV2Item(input: { projectId: $projectId, itemId: $itemId }) {
+                      item { id }
+                    }
+                  }
+                `, { projectId: project.id, itemId: item.id });
+                core.info('Unarchived issue on the project board.');
+              }
+
+              // Set Status -> Concept review (runs last, so it wins over any
+              // built-in "item reopened" board automation).
+              await github.graphql(`
+                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: $projectId,
+                    itemId: $itemId,
+                    fieldId: $fieldId,
+                    value: { singleSelectOptionId: $optionId }
+                  }) {
+                    projectV2Item { id }
+                  }
+                }
+              `, { projectId: project.id, itemId: item.id, fieldId: statusField.id, optionId: option.id });
+
+              core.info(`Moved issue to "${TARGET_COLUMN}".`);
+            } catch (error) {
+              core.warning(`Unable to move issue to "${TARGET_COLUMN}": ${error.message}`);
+            }
+
+  resubmit-process:
+    needs: [resubmit-issue, resubmit-reopen]
+    if: needs.resubmit-issue.outputs.proceed == 'true'
+    uses: ./.github/workflows/process-created-issue.yml
+    secrets: inherit

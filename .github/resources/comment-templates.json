@@ -14,7 +14,9 @@
       "",
       "**Error:** {{ERROR_MESSAGE}}",
       "",
-      "Please correct the issue and submit a new request."
+      "---",
+      "",
+      "Once you've resolved the above, comment `/resubmit` and we'll run your submission through the checks again."
     ],
     "failure-generic": [
       "❌ Submission failed.",
@@ -54,6 +56,28 @@
       "❌ Update submission failed.",
       "",
       "Your update could not be processed. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance."
+    ]
+  },
+  "resubmit": {
+    "already-processed": [
+      "ℹ️ This submission has already been processed.",
+      "",
+      "A ticket was created for this extension on a previous run, so it can't be resubmitted. If you need to make changes, please comment on this issue or contact [bapps@portswigger.net](mailto:bapps@portswigger.net)."
+    ],
+    "not-authorized": [
+      "⚠️ Only the original submitter or a member of the PortSwigger team can resubmit this extension.",
+      "",
+      "If you're the submitter, please comment from the account that opened this issue."
+    ],
+    "not-eligible": [
+      "⚠️ This issue can't be resubmitted.",
+      "",
+      "`/resubmit` only applies to extension submissions that have been closed after a failed check. If you believe this is a mistake, please contact [bapps@portswigger.net](mailto:bapps@portswigger.net)."
+    ],
+    "lookup-failed": [
+      "⚠️ We couldn't verify this submission's status just now, so we've held off on resubmitting to avoid creating a duplicate.",
+      "",
+      "Please try commenting `/resubmit` again shortly. If the problem persists, contact [bapps@portswigger.net](mailto:bapps@portswigger.net)."
     ]
   },
   "reopen-issue": {
