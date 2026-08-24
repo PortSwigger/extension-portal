@@ -271,12 +271,14 @@ jobs:
         with:
           script: |
             const title = process.env.TITLE;
+            const repoUrl = process.env.REPO_URL || '';
             const issueUrl = context.payload.issue.html_url;
 
             const jiraAuth = Buffer.from(`${process.env.JIRA_USER_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
             const jiraHeaders = { 'Authorization': `Basic ${jiraAuth}`, 'Content-Type': 'application/json' };
 
-            // Create Jira ticket
+            // Create Jira ticket. The sanitized repository URL is recorded as the
+            // "bapp url" (customfield_10932); update subtasks are matched to this ticket by it.
             const createResponse = await fetch(`${process.env.JIRA_BASE_URL}/rest/api/3/issue`, {
               method: 'POST',
               headers: jiraHeaders,
@@ -285,6 +287,7 @@ jobs:
                   project: { key: "BAPP" },
                   summary: title,
                   issuetype: { id: "10278" },
+                  customfield_10932: repoUrl,
                   customfield_13486: issueUrl
                 }
               })
@@ -306,6 +309,7 @@ jobs:
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
+          REPO_URL: ${{ needs.validate-submission.outputs.normalized_url }}
 
       - name: Convert product compatibility format
         id: convert_products
