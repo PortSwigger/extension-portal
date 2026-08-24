@@ -11,7 +11,7 @@ import sys
 import os
 
 
-def set_output(key, value):
+def set_output(key, value, output_file=None):
     """
     Set a GitHub Actions output variable.
 
@@ -25,6 +25,9 @@ def set_output(key, value):
     Args:
         key: Output variable name
         value: Output variable value
+        output_file: Path to write to. Defaults to the GITHUB_OUTPUT
+            environment variable. Pass an explicit path to exercise the
+            file-writing path in tests without setting GITHUB_OUTPUT.
 
     Example:
         # Set an output
@@ -33,15 +36,19 @@ def set_output(key, value):
         # Set an error output with accompanying annotation
         print('::error::Repository not found', file=sys.stderr)
         set_output('error_message', 'Repository not found')
+
+        # Write to a known path, for tests
+        set_output('normalized_url', 'https://github.com/owner/repo', tmp_file)
     """
-    github_output = os.environ.get('GITHUB_OUTPUT')
-    if github_output:
+    if output_file is None:
+        output_file = os.environ.get('GITHUB_OUTPUT')
+    if output_file:
         try:
-            with open(github_output, 'a') as f:
+            with open(output_file, 'a') as f:
                 delimiter = f'ghadelimiter_{os.urandom(8).hex()}'
                 f.write(f'{key}<<{delimiter}\n{value}\n{delimiter}\n')
         except Exception as e:
-            print(f'::warning::Could not write {key} to GITHUB_OUTPUT: {e}', file=sys.stderr)
+            print(f'::warning::Could not write {key} to {output_file}: {e}', file=sys.stderr)
     else:
         # Fallback for local testing
         print(f'{key}={value}')
