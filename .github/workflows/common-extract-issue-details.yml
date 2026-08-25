@@ -1,0 +1,73 @@
+name: Extract issue details
+
+# Extracts the submitted values from the triggering issue and sanitizes them.
+# Shared by the created-issue and edited-issue pipelines so both read the issue
+# form the same way.
+
+on:
+  workflow_call:
+    outputs:
+      type:
+        description: 'extension-submission, extension-update, or empty for an unrecognised issue type'
+        value: ${{ jobs.extract.outputs.type }}
+      url:
+        description: 'Extension repository URL (submissions) or pull request URL (updates)'
+        value: ${{ jobs.extract.outputs.url }}
+      version_number:
+        description: 'Submitted version number'
+        value: ${{ jobs.extract.outputs.version_number }}
+      author:
+        description: 'Author display name'
+        value: ${{ jobs.extract.outputs.author }}
+      title:
+        description: 'Issue title'
+        value: ${{ jobs.extract.outputs.title }}
+      error_message:
+        description: 'Sanitization error, if any of the submitted values were rejected'
+        value: ${{ jobs.extract.outputs.error_message }}
+      product_compatibility:
+        description: 'JSON array of the selected compatible products'
+        value: ${{ jobs.extract.outputs.product_compatibility }}
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      type: ${{ steps.extract.outputs.type }}
+      url: ${{ steps.sanitize.outputs.url }}
+      version_number: ${{ steps.sanitize.outputs.version_number }}
+      author: ${{ steps.sanitize.outputs.author }}
+      title: ${{ steps.sanitize.outputs.title }}
+      error_message: ${{ steps.sanitize.outputs.error_message }}
+      product_compatibility: ${{ steps.sanitize.outputs.product_compatibility }}
+
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Extract submission details
+        id: extract
+        run: |
+          python3 .github/scripts/extract_issue_fields.py
+        env:
+          ISSUE_TYPE_NAME: ${{ github.event.issue.type.name }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+
+      - name: Sanitize inputs
+        id: sanitize
+        uses: PortSwigger/shared-workflows/sanitize-inputs@5ac869b4e30a6d1ee4b6e65c482eb05ef566d550 # v1.0.4
+        with:
+          type: ${{ steps.extract.outputs.type }}
+          title: ${{ steps.extract.outputs.title }}
+          author: ${{ steps.extract.outputs.author }}
+          url: ${{ steps.extract.outputs.url }}
+          version_number: ${{ steps.extract.outputs.version_number }}
+          product_compatibility: ${{ steps.extract.outputs.product_compatibility }}
