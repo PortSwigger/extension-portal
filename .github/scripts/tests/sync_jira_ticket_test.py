@@ -79,6 +79,7 @@ def edit(**overrides):
         'ISSUE_TITLE': 'New Name',
         'VERSION_NUMBER': '2.1.0',
         'SUBMITTED_URL': 'https://github.com/acme/new',
+        'PREVIOUS_SUMMARY': 'Old Name',
         'PREVIOUS_URL': 'https://github.com/acme/old',
         'VALIDATION_ERROR': '',
     }
@@ -281,13 +282,13 @@ class ZoomPayloadTests(unittest.TestCase):
         payload = self.payload(sjt.Outcome('flagged', 'BAPP-100'), URL_CHANGED='true')
         self.assertEqual(payload['Alert'], 'Submission repointed at different code')
         self.assertEqual(payload['Ticket'], 'BAPP-100 (unchanged)')
-        self.assertEqual(payload['Previous Extension URL'], 'https://github.com/acme/old')
-        self.assertEqual(payload['New Extension URL'], 'https://github.com/acme/new')
+        self.assertEqual(payload['Extension URL'],
+                         'https://github.com/acme/old -> https://github.com/acme/new')
 
     def test_flagged_labels_an_update_as_a_pull_request(self):
         payload = self.payload(sjt.Outcome('flagged', 'BAPP-200'),
                                SUBMISSION_TYPE='extension-update', URL_CHANGED='true')
-        self.assertIn('Previous Pull request', payload)
+        self.assertIn('Pull request', payload)
 
     def test_reports_an_applied_submitter_edit(self):
         payload = self.payload(sjt.Outcome('updated', 'BAPP-100', ('Summary',)))
@@ -303,6 +304,40 @@ class ZoomPayloadTests(unittest.TestCase):
                                (sjt.Outcome('manual', reason='x'), {})]:
             payload = self.payload(outcome, **extra)
             self.assertEqual(payload['Edited by'], 'alice (submitter access)')
+
+    def test_a_submitter_name_change_reports_both_values(self):
+        payload = self.payload(sjt.Outcome('updated', 'BAPP-100', ('Summary',)),
+                               SUMMARY_CHANGED='true')
+        self.assertEqual(payload['Name'], 'Old Name -> New Name')
+
+    def test_a_submitter_url_change_reports_both_values(self):
+        payload = self.payload(sjt.Outcome('flagged', 'BAPP-100'), URL_CHANGED='true')
+        self.assertEqual(payload['Extension URL'],
+                         'https://github.com/acme/old -> https://github.com/acme/new')
+
+    def test_a_submitter_changing_both_reports_both(self):
+        payload = self.payload(sjt.Outcome('flagged', 'BAPP-100'),
+                               SUMMARY_CHANGED='true', URL_CHANGED='true')
+        self.assertEqual(payload['Name'], 'Old Name -> New Name')
+        self.assertEqual(payload['Extension URL'],
+                         'https://github.com/acme/old -> https://github.com/acme/new')
+
+    def test_an_update_reports_version_rather_than_name(self):
+        payload = self.payload(sjt.Outcome('updated', 'BAPP-200', ('Summary',)),
+                               SUBMISSION_TYPE='extension-update', SUMMARY_CHANGED='true',
+                               PREVIOUS_SUMMARY='2.0.0')
+        self.assertEqual(payload['Version'], '2.0.0 -> 2.1.0')
+        self.assertNotIn('Name', payload)
+
+    def test_an_unchanged_field_is_not_reported(self):
+        payload = self.payload(sjt.Outcome('updated', 'BAPP-100', ('Summary',)),
+                               SUMMARY_CHANGED='true')
+        self.assertNotIn('Extension URL', payload)
+
+    def test_a_missing_value_reads_as_none_rather_than_blank(self):
+        payload = self.payload(sjt.Outcome('flagged', 'BAPP-100'),
+                               URL_CHANGED='true', PREVIOUS_URL='')
+        self.assertEqual(payload['Extension URL'], '(none) -> https://github.com/acme/new')
 
     def test_encoding_round_trips(self):
         payload = self.payload(sjt.Outcome('updated', 'BAPP-100', ('Summary',)))

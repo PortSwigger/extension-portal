@@ -62,6 +62,7 @@ def main():
     set_output('summary_changed', output_flag(changes['summary_changed']))
     set_output('url_changed', output_flag(changes['url_changed']))
     set_output('any_changed', output_flag(changes['any_changed']))
+    set_output('previous_summary', summary_of(previous))
     set_output('previous_url', previous['url'])
 
 

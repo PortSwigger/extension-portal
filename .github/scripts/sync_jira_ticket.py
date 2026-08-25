@@ -60,6 +60,7 @@ class Edit:
     title: str
     version_number: str
     url: str
+    previous_summary: str
     previous_url: str
     validation_error: str
 
@@ -81,6 +82,7 @@ class Edit:
             title=env.get('ISSUE_TITLE', '').strip(),
             version_number=env.get('VERSION_NUMBER', '').strip(),
             url=env.get('SUBMITTED_URL', '').strip(),
+            previous_summary=env.get('PREVIOUS_SUMMARY', '').strip(),
             previous_url=env.get('PREVIOUS_URL', '').strip(),
             validation_error=env.get('VALIDATION_ERROR', '').strip(),
         )
@@ -92,6 +94,14 @@ class Edit:
     @property
     def url_label(self):
         return 'Pull request' if self.is_update else 'Extension URL'
+
+    @property
+    def summary_label(self):
+        return 'Version' if self.is_update else 'Name'
+
+    @property
+    def summary_value(self):
+        return self.version_number if self.is_update else self.title
 
     @property
     def desired_summary(self):
@@ -232,6 +242,19 @@ def sync(jira, edit):
             'manual', reason=f'Unexpected error while updating the associated ticket: {e}')
 
 
+def changed_fields(edit):
+    """What the edit did to each field the ticket takes from the issue."""
+    def moved(before, after):
+        return f'{before or "(none)"} -> {after or "(none)"}'
+
+    fields = {}
+    if edit.summary_changed:
+        fields[edit.summary_label] = moved(edit.previous_summary, edit.summary_value)
+    if edit.url_changed:
+        fields[edit.url_label] = moved(edit.previous_url, edit.url)
+    return fields
+
+
 def zoom_payload(edit, outcome):
     """The notification for this outcome, or None when there is nothing to report."""
     if not edit.validation_error and outcome.status not in ('updated', 'flagged', 'manual'):
@@ -245,6 +268,7 @@ def zoom_payload(edit, outcome):
         'Extension': edit.title,
         'Issue': edit.issue_url,
         'Edited by': f'{edit.editor} ({edit.editor_access} access)',
+        **changed_fields(edit),
     }
 
     if edit.is_maintainer:
@@ -256,8 +280,6 @@ def zoom_payload(edit, outcome):
         payload['Action'] = '⚠️ Ticket left unchanged - the edited details were rejected.'
     elif outcome.status == 'flagged':
         payload['Ticket'] = f'{outcome.ticket_key} (unchanged)'
-        payload[f'Previous {edit.url_label}'] = edit.previous_url or '(none)'
-        payload[f'New {edit.url_label}'] = edit.url or '(none)'
         payload['Action'] = ('⚠️ Treat as a new submission - review has not been re-run '
                              'and the ticket has NOT been updated.')
     elif outcome.status == 'updated':
