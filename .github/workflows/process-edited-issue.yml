@@ -1,0 +1,106 @@
+name: Process edited issue
+
+on:
+  issues:
+    types: [edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-issue-${{ github.event.issue.user.login }}
+  cancel-in-progress: false
+
+jobs:
+  detect-changes:
+    if: |
+      (github.event.issue.type.name == 'Extension' ||
+       github.event.issue.type.name == 'Update') &&
+      github.event.issue.state == 'open'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      any_changed: ${{ steps.compare.outputs.any_changed }}
+      summary_changed: ${{ steps.compare.outputs.summary_changed }}
+      url_changed: ${{ steps.compare.outputs.url_changed }}
+      previous_url: ${{ steps.compare.outputs.previous_url }}
+
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Compare ticket-bound fields
+        id: compare
+        run: python3 .github/scripts/detect_issue_changes.py
+        env:
+          ISSUE_TYPE_NAME: ${{ github.event.issue.type.name }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          PREVIOUS_TITLE: ${{ github.event.changes.title.from }}
+          PREVIOUS_BODY: ${{ github.event.changes.body.from }}
+
+  extract-current:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.any_changed == 'true'
+    uses: ./.github/workflows/common-extract-issue-details.yml
+
+  sync-jira:
+    needs: [detect-changes, extract-current]
+    if: |
+      !cancelled() &&
+      needs.detect-changes.outputs.any_changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      zoom_payload: ${{ steps.sync.outputs.zoom_payload }}
+
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Establish whether a maintainer made the edit
+        id: editor
+        run: python3 .github/scripts/check_editor_access.py
+        env:
+          EDITOR_LOGIN: ${{ github.event.sender.login }}
+          EDITOR_TYPE: ${{ github.event.sender.type }}
+          AUTHOR_LOGIN: ${{ github.event.issue.user.login }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply the edit to the associated ticket
+        id: sync
+        run: python3 .github/scripts/sync_jira_ticket.py
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          SUBMISSION_TYPE: ${{ needs.extract-current.outputs.type }}
+          ISSUE_TITLE: ${{ needs.extract-current.outputs.title }}
+          VERSION_NUMBER: ${{ needs.extract-current.outputs.version_number }}
+          SUBMITTED_URL: ${{ needs.extract-current.outputs.url }}
+          VALIDATION_ERROR: ${{ needs.extract-current.outputs.error_message }}
+          PREVIOUS_URL: ${{ needs.detect-changes.outputs.previous_url }}
+          SUMMARY_CHANGED: ${{ needs.detect-changes.outputs.summary_changed }}
+          URL_CHANGED: ${{ needs.detect-changes.outputs.url_changed }}
+          IS_MAINTAINER: ${{ steps.editor.outputs.is_maintainer }}
+          EDITOR_ACCESS: ${{ steps.editor.outputs.access }}
+          EDITOR_LOGIN: ${{ github.event.sender.login }}
+
+  notify-zoom:
+    needs: sync-jira
+    if: |
+      !cancelled() &&
+      needs.sync-jira.outputs.zoom_payload != ''
+    uses: ./.github/workflows/common-notify-zoom.yml
+    with:
+      payload: ${{ needs.sync-jira.outputs.zoom_payload }}
+    secrets:
+      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
+      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}

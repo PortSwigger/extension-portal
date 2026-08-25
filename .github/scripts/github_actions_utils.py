@@ -52,3 +52,8 @@ def set_output(key, value, output_file=None):
     else:
         # Fallback for local testing
         print(f'{key}={value}')
+
+
+def output_flag(value):
+    """Render a boolean as GitHub Actions compares outputs: as a string."""
+    return 'true' if value else 'false'

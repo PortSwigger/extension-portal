@@ -109,7 +109,8 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertEqual(fields['url'], '')
 
     def test_none_body_is_tolerated(self):
-        self.assertEqual(extract_issue_fields(body=None, title='T', issue_type_name='Extension')['url'], '')
+        fields = extract_issue_fields(body=None, title='T', issue_type_name='Extension')
+        self.assertEqual(fields['url'], '')
 
     def test_unknown_issue_type_yields_no_url(self):
         fields = extract_issue_fields(body=SUBMISSION_BODY, title='T', issue_type_name='Bug')
@@ -122,7 +123,8 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertEqual(fields['url'], 'https://github.com/acme/widget')
 
     def test_title_defaults_to_empty(self):
-        self.assertEqual(extract_issue_fields(body='', title=None, issue_type_name='Extension')['title'], '')
+        fields = extract_issue_fields(body='', title=None, issue_type_name='Extension')
+        self.assertEqual(fields['title'], '')
 
 
 if __name__ == '__main__':

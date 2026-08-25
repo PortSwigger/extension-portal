@@ -19,6 +19,7 @@ import re
 import json
 from urllib import request, error
 from github_actions_utils import set_output
+from github_urls import normalize_url
 
 def extract_pr_ref(url):
     """Extract owner, repo and pull request number from a GitHub pull request URL."""
@@ -51,13 +52,6 @@ def github_api_get(api_url, github_token=None):
         if e.code == 404:
             raise ValueError(f"GitHub resource not found: {api_url}")
         raise ValueError(f"GitHub API error: {e.code} {e.reason}")
-
-def normalize_url(url):
-    """Normalize a GitHub URL for comparison (drop trailing .git/slash, lowercase)."""
-    value = (url or '').strip().rstrip('/')
-    if value.endswith('.git'):
-        value = value[:-len('.git')]
-    return value.rstrip('/').lower()
 
 def resolve_source_repo(owner, repo, pull_number, github_token=None):
     """
