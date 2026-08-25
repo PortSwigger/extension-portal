@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 
 """
-Decides whether an edit to an issue changed anything the Jira ticket holds.
+Decides whether an edit changed anything the Jira ticket holds: its summary
+(the issue title, or the version number for updates) or its bapp url.
 
-The ticket takes its summary from the issue title (submissions) or version
-number (updates), and its bapp url from the extension repository (submissions)
-or pull request (updates). An edit touching neither stops the pipeline here.
-
-Both revisions are in the webhook payload, so this needs no network access.
+An edit touching neither stops the pipeline here. Both revisions are in the
+webhook payload, so this needs no network access.
 """
 
 import os
@@ -62,8 +60,6 @@ def main():
     set_output('summary_changed', output_flag(changes['summary_changed']))
     set_output('url_changed', output_flag(changes['url_changed']))
     set_output('any_changed', output_flag(changes['any_changed']))
-    set_output('previous_summary', summary_of(previous))
-    set_output('previous_url', previous['url'])
 
 
 if __name__ == '__main__':

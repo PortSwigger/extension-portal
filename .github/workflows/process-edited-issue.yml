@@ -23,8 +23,6 @@ jobs:
       any_changed: ${{ steps.compare.outputs.any_changed }}
       summary_changed: ${{ steps.compare.outputs.summary_changed }}
       url_changed: ${{ steps.compare.outputs.url_changed }}
-      previous_summary: ${{ steps.compare.outputs.previous_summary }}
-      previous_url: ${{ steps.compare.outputs.previous_url }}
 
     steps:
       - name: Checkout scripts
@@ -87,8 +85,6 @@ jobs:
           VERSION_NUMBER: ${{ needs.extract-current.outputs.version_number }}
           SUBMITTED_URL: ${{ needs.extract-current.outputs.url }}
           VALIDATION_ERROR: ${{ needs.extract-current.outputs.error_message }}
-          PREVIOUS_SUMMARY: ${{ needs.detect-changes.outputs.previous_summary }}
-          PREVIOUS_URL: ${{ needs.detect-changes.outputs.previous_url }}
           SUMMARY_CHANGED: ${{ needs.detect-changes.outputs.summary_changed }}
           URL_CHANGED: ${{ needs.detect-changes.outputs.url_changed }}
           IS_MAINTAINER: ${{ steps.editor.outputs.is_maintainer }}

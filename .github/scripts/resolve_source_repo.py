@@ -15,28 +15,19 @@ be discussed on the GitHub issue.
 
 import sys
 import os
-import re
 import json
 from urllib import request, error
 from github_actions_utils import set_output
-from github_urls import normalize_url
+from github_urls import normalize_url, pull_request_parts
 
 def extract_pr_ref(url):
     """Extract owner, repo and pull request number from a GitHub pull request URL."""
-    match = re.match(
-        r'(?:https://)?(?:www\.)?github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/pull/(\d+)',
-        url,
-    )
-    if not match:
+    parts = pull_request_parts(url)
+    if not parts:
         raise ValueError(
-            f"Could not extract a pull request reference from URL: {url}. "
-            "Expected a link of the form https://github.com/PortSwigger/<repo>/pull/<number>."
+            f"Could not extract a pull request reference from URL: {url}."
         )
-
-    owner = match.group(1)
-    repo = match.group(2)
-    pull_number = match.group(3)
-    return owner, repo, pull_number
+    return parts
 
 def github_api_get(api_url, github_token=None):
     """Fetch and decode a GitHub API resource, raising ValueError on failure."""

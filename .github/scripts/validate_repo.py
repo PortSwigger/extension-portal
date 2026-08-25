@@ -6,20 +6,17 @@ Validates GitHub repository - checks if it exists and is not a fork
 
 import sys
 import os
-import re
 import json
 from urllib import request, error
 from github_actions_utils import set_output
+from github_urls import repository_parts
 
 def extract_owner_repo(url):
-    """Extract owner and repo from GitHub URL"""
-    match = re.match(r'(?:https://)?(?:www\.)?github\.com/([^/]+)/([^/]+)', url)
-    if not match:
+    """Extract owner and repo from a GitHub repository URL"""
+    parts = repository_parts(url)
+    if not parts:
         raise ValueError(f"Could not extract owner/repo from URL: {url}")
-
-    owner = match.group(1)
-    repo = match.group(2).rstrip('/')
-    return owner, repo
+    return parts
 
 def validate_repo(owner, repo, github_token=None):
     """

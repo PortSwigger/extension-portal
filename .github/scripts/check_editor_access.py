@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 
 """
-Decides whether an issue was edited by a maintainer or by its submitter.
+Decides whether an issue was edited by a maintainer or by its submitter, which
+determines how much of the edit is applied to the associated ticket.
 
-A maintainer's edit is applied to the associated ticket in full; a submitter's
-change of bapp url is not, because that is the artifact that was reviewed.
-
-The submitter and bots are ruled out from the webhook payload alone. Write
-access is then confirmed against the GitHub API, which is what separates a
-maintainer from a triage-only account; asking needs push access, which the
-default GITHUB_TOKEN may not hold, so an unanswerable lookup leaves the payload
-checks standing.
+The submitter and bots are ruled out from the payload alone. Write access is
+then confirmed against the API, separating a maintainer from a triage-only
+account; an unanswerable lookup leaves the payload checks standing.
 """
 
 import json

@@ -160,84 +160,24 @@ jobs:
       template_key: ${{ steps.decide.outputs.template_key }}
 
     steps:
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
       - name: Decide whether to resubmit
         id: decide
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const issue = context.payload.issue;
-            const comment = context.payload.comment;
-
-            const refuse = (templateKey, reason) => {
-              core.info(reason);
-              core.setOutput('proceed', 'false');
-              core.setOutput('template_key', templateKey);
-            };
-
-            // 1. Authorisation: the original submitter or a maintainer.
-            const isAuthor = comment.user.login === issue.user.login;
-            const isMaintainer = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(comment.author_association);
-            if (!isAuthor && !isMaintainer) {
-              return refuse('resubmit.not-authorized', `${comment.user.login} is not authorised to resubmit.`);
-            }
-
-            // 2. Must be an extension submission (the "Extension" GitHub issue type).
-            const issueType = issue.type && issue.type.name;
-            if (issueType !== 'Extension') {
-              return refuse('resubmit.not-eligible', `Issue type "${issueType}" is not a resubmittable extension submission.`);
-            }
-
-            // 3. Refuse if a BAPP ticket already exists for this issue - that means a
-            //    previous run succeeded, and resubmitting would create a duplicate.
-            //    Submission tickets record the GitHub issue URL in customfield_13486.
-            const issueUrl = issue.html_url;
-            const jiraAuth = Buffer.from(`${process.env.JIRA_USER_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
-            const jiraHeaders = {
-              'Authorization': `Basic ${jiraAuth}`,
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            };
-
-            const escapeJql = (value) => (value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-            const searchJql = async (operator) => {
-              const jql = `project = BAPP AND issuetype = 10278 AND cf[13486] ${operator} "${escapeJql(issueUrl)}"`;
-              return fetch(`${process.env.JIRA_BASE_URL}/rest/api/3/search/jql`, {
-                method: 'POST',
-                headers: jiraHeaders,
-                body: JSON.stringify({ jql, fields: ['customfield_13486'], maxResults: 50 })
-              });
-            };
-
-            // Prefer the "contains" operator; fall back to exact match if the field rejects it.
-            let searchResponse = await searchJql('~');
-            if (searchResponse.status === 400) {
-              searchResponse = await searchJql('=');
-            }
-            if (!searchResponse.ok) {
-              // Fail safe: if we cannot confirm the ticket state, do not risk a duplicate.
-              return refuse('resubmit.lookup-failed', `Jira lookup failed: ${searchResponse.status}.`);
-            }
-
-            const searchData = await searchResponse.json();
-            const foundIssues = searchData.issues || [];
-
-            // Exact-match the issue URL to guard against fuzzy "~" matches.
-            const normalize = (value) => (value || '').trim().replace(/\/+$/, '').toLowerCase();
-            const target = normalize(issueUrl);
-            const alreadySubmitted = foundIssues.some(
-              i => normalize(i.fields && i.fields.customfield_13486) === target
-            );
-            if (alreadySubmitted) {
-              return refuse('resubmit.already-processed', 'A BAPP ticket already exists for this issue.');
-            }
-
-            core.info('Resubmission approved.');
-            core.setOutput('proceed', 'true');
-            core.setOutput('template_key', '');
+        run: python3 .github/scripts/check_resubmit_eligibility.py
         env:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+          ISSUE_TYPE_NAME: ${{ github.event.issue.type.name }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
 
   resubmit-reject-comment:
     needs: resubmit-issue

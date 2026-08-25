@@ -3,49 +3,31 @@
 """
 Applies an edited issue to its associated Jira ticket, or flags it for the team.
 
-Two fields on the ticket come from the issue:
+The ticket takes its summary and its bapp url from the issue. The bapp url is
+the artifact that was reviewed, so only a maintainer may change it; a submitter
+doing so is flagged instead, because it makes this a new submission.
 
-    summary   - the issue title for submissions, the version number for updates.
-    bapp url  - the extension repository for submissions, the pull request for
-                updates.
-
-The bapp url is the artifact that was reviewed. A submitter repointing it makes
-this, in effect, a new submission, so the ticket is left untouched and the team
-is asked to decide; a maintainer repointing it is a deliberate correction and is
-applied. Everything the pipeline decides is reported to Zoom and to the run log,
-never on the issue itself.
-
-Reads the edit from the environment and writes the outcome, plus a Zoom payload
-when one is warranted, as GitHub Actions outputs.
+Outcomes go to Zoom and the run log, never to the issue.
 """
 
 import base64
 import json
 import os
 import sys
-from dataclasses import dataclass
-from urllib import error, request
+from dataclasses import dataclass, field
+from urllib import error
 
+import jira
 from github_actions_utils import set_output
-from github_urls import canonical_repository_url, normalize_url
-
-JIRA_PROJECT = 'BAPP'
-SUBMISSION_ISSUE_TYPE = '10278'
-UPDATE_SUBTASK_ISSUE_TYPE = '10279'
-BAPP_URL_FIELD = 'customfield_10932'
-GITHUB_ISSUE_FIELD = 'customfield_13486'
+from github_urls import normalize_url, repository_url
 
 
 class NeedsManualIntervention(Exception):
     """The edit could not be applied with confidence, so the team must decide."""
 
 
-def jql_field(field):
-    return f"cf[{field.removeprefix('customfield_')}]"
-
-
-def escape_jql(value):
-    return (value or '').replace('\\', '\\\\').replace('"', '\\"')
+class TicketNotCreated(NeedsManualIntervention):
+    """No ticket exists yet, which is expected rather than faulty."""
 
 
 @dataclass(frozen=True)
@@ -60,8 +42,6 @@ class Edit:
     title: str
     version_number: str
     url: str
-    previous_summary: str
-    previous_url: str
     validation_error: str
 
     @classmethod
@@ -82,14 +62,12 @@ class Edit:
             title=env.get('ISSUE_TITLE', '').strip(),
             version_number=env.get('VERSION_NUMBER', '').strip(),
             url=env.get('SUBMITTED_URL', '').strip(),
-            previous_summary=env.get('PREVIOUS_SUMMARY', '').strip(),
-            previous_url=env.get('PREVIOUS_URL', '').strip(),
             validation_error=env.get('VALIDATION_ERROR', '').strip(),
         )
 
     @property
     def ticket_issue_type(self):
-        return UPDATE_SUBTASK_ISSUE_TYPE if self.is_update else SUBMISSION_ISSUE_TYPE
+        return jira.UPDATE_SUBTASK_ISSUE_TYPE if self.is_update else jira.SUBMISSION_ISSUE_TYPE
 
     @property
     def url_label(self):
@@ -100,16 +78,12 @@ class Edit:
         return 'Version' if self.is_update else 'Name'
 
     @property
-    def summary_value(self):
-        return self.version_number if self.is_update else self.title
-
-    @property
     def desired_summary(self):
         return f'v{self.version_number}' if self.is_update else self.title
 
     @property
     def desired_bapp_url(self):
-        return self.url if self.is_update else canonical_repository_url(self.url)
+        return self.url if self.is_update else repository_url(self.url)
 
 
 @dataclass(frozen=True)
@@ -118,73 +92,25 @@ class Outcome:
     ticket_key: str = ''
     applied: tuple = ()
     reason: str = ''
+    held: dict = field(default_factory=dict)
 
 
-class JiraClient:
-    def __init__(self, base_url, email, token):
-        self._base_url = (base_url or '').rstrip('/')
-        credentials = base64.b64encode(f'{email}:{token}'.encode()).decode()
-        self._headers = {
-            'Authorization': f'Basic {credentials}',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-        }
-
-    def _send(self, method, path, payload):
-        req = request.Request(f'{self._base_url}{path}', method=method,
-                              data=json.dumps(payload).encode())
-        for name, value in self._headers.items():
-            req.add_header(name, value)
-        with request.urlopen(req) as response:
-            body = response.read().decode()
-        return json.loads(body) if body else {}
-
-    def search(self, jql, fields):
-        return self._send('POST', '/rest/api/3/search/jql',
-                          {'jql': jql, 'fields': fields, 'maxResults': 50})
-
-    def find_by_url_field(self, issue_type, field, url, fields):
-        """
-        Tickets of this type whose `field` holds this URL.
-
-        Jira matches URL fields loosely, so the search asks for "contains" - falling
-        back to exact match if the field rejects that - and the results are then
-        compared properly.
-        """
-        def jql(operator):
-            return (f'project = {JIRA_PROJECT} AND issuetype = {issue_type} '
-                    f'AND {jql_field(field)} {operator} "{escape_jql(url)}"')
-
-        try:
-            results = self.search(jql('~'), fields)
-        except error.HTTPError as e:
-            if e.code != 400:
-                raise
-            results = self.search(jql('='), fields)
-
-        return [ticket for ticket in results.get('issues', [])
-                if normalize_url(ticket.get('fields', {}).get(field)) == normalize_url(url)]
-
-    def update_issue(self, key, fields):
-        self._send('PUT', f'/rest/api/3/issue/{key}', {'fields': fields})
-
-
-def find_ticket(jira, edit):
+def find_ticket(client, edit):
     try:
-        matches = jira.find_by_url_field(
-            edit.ticket_issue_type, GITHUB_ISSUE_FIELD, edit.issue_url,
-            ['summary', BAPP_URL_FIELD, GITHUB_ISSUE_FIELD])
+        matches = client.find_by_url_field(
+            edit.ticket_issue_type, jira.GITHUB_ISSUE_FIELD, edit.issue_url,
+            ['summary', jira.BAPP_URL_FIELD, jira.GITHUB_ISSUE_FIELD])
     except error.HTTPError as e:
         raise NeedsManualIntervention(
             f'Jira search for the associated ticket failed: {e.code}.')
 
     if not matches:
-        raise NeedsManualIntervention(
-            f'No {JIRA_PROJECT} ticket is associated with {edit.issue_url}.')
+        raise TicketNotCreated(
+            f'No {jira.PROJECT} ticket has been created for {edit.issue_url} yet.')
     if len(matches) > 1:
         keys = ', '.join(ticket['key'] for ticket in matches)
         raise NeedsManualIntervention(
-            f'Multiple {JIRA_PROJECT} tickets ({keys}) are associated with {edit.issue_url}.')
+            f'Multiple {jira.PROJECT} tickets ({keys}) are associated with {edit.issue_url}.')
     return matches[0]
 
 
@@ -207,34 +133,38 @@ def changes_to_apply(edit, ticket):
         bapp_url = edit.desired_bapp_url
         if not bapp_url:
             raise NeedsManualIntervention(
-                f'"{edit.url}" is not a URL we can record, so {ticket["key"]} has been '
-                f'left as it was.')
-        if normalize_url(held.get(BAPP_URL_FIELD)) != normalize_url(bapp_url):
-            fields[BAPP_URL_FIELD] = bapp_url
+                f'The edited URL came through empty, so {ticket["key"]} has '
+                f'been left as it was.')
+        if normalize_url(held.get(jira.BAPP_URL_FIELD)) != normalize_url(bapp_url):
+            fields[jira.BAPP_URL_FIELD] = bapp_url
             applied.append(edit.url_label)
 
     return fields, applied
 
 
-def sync(jira, edit):
+def sync(client, edit):
     try:
-        ticket = find_ticket(jira, edit)
+        ticket = find_ticket(client, edit)
 
+        held = ticket.get('fields', {})
         if edit.url_changed and not edit.is_maintainer:
-            return Outcome('flagged', ticket_key=ticket['key'])
+            return Outcome('flagged', ticket_key=ticket['key'], held=held)
 
         fields, applied = changes_to_apply(edit, ticket)
         if not fields:
-            return Outcome('unchanged', ticket_key=ticket['key'])
+            return Outcome('unchanged', ticket_key=ticket['key'], held=held)
 
         try:
-            jira.update_issue(ticket['key'], fields)
+            client.update_issue(ticket['key'], fields)
         except error.HTTPError as e:
             raise NeedsManualIntervention(
                 f'Failed to update {ticket["key"]}: {e.code} {e.read().decode(errors="replace")}')
 
-        return Outcome('updated', ticket_key=ticket['key'], applied=tuple(applied))
+        return Outcome('updated', ticket_key=ticket['key'],
+                       applied=tuple(applied), held=held)
 
+    except TicketNotCreated as e:
+        return Outcome('absent', reason=str(e))
     except NeedsManualIntervention as e:
         return Outcome('manual', reason=str(e))
     except Exception as e:
@@ -242,55 +172,72 @@ def sync(jira, edit):
             'manual', reason=f'Unexpected error while updating the associated ticket: {e}')
 
 
-def changed_fields(edit):
-    """What the edit did to each field the ticket takes from the issue."""
+def changed_fields(edit, outcome):
+    """
+    What the edit did to each field, reading the before-value from the ticket so
+    that no unsanitized issue content is quoted back to the team.
+    """
     def moved(before, after):
-        return f'{before or "(none)"} -> {after or "(none)"}'
+        after = after or '(none)'
+        return f'{before} -> {after}' if before else after
 
     fields = {}
     if edit.summary_changed:
-        fields[edit.summary_label] = moved(edit.previous_summary, edit.summary_value)
+        fields[edit.summary_label] = moved(outcome.held.get('summary'), edit.desired_summary)
     if edit.url_changed:
-        fields[edit.url_label] = moved(edit.previous_url, edit.url)
+        fields[edit.url_label] = moved(outcome.held.get(jira.BAPP_URL_FIELD),
+                                       edit.desired_bapp_url)
     return fields
+
+
+def worth_reporting(edit, outcome):
+    """A maintainer's edit passes quietly unless it could not be applied."""
+    if edit.validation_error:
+        return True
+    if outcome.status not in ('updated', 'flagged', 'manual', 'absent'):
+        return False
+    return not edit.is_maintainer or outcome.status in ('manual', 'absent')
 
 
 def zoom_payload(edit, outcome):
     """The notification for this outcome, or None when there is nothing to report."""
-    if not edit.validation_error and outcome.status not in ('updated', 'flagged', 'manual'):
-        return None
-    if edit.is_maintainer and not edit.validation_error and outcome.status != 'manual':
+    if not worth_reporting(edit, outcome):
         return None
 
-    payload = {
-        'Alert': ('Submission repointed at different code' if outcome.status == 'flagged'
-                  else 'Submission details edited'),
+    alert = 'Submission details edited'
+
+    if outcome.status == 'absent':
+        alert = 'Submission edited before its ticket was created'
+        detail = {'Action': 'No ticket exists for this submission yet - '
+                            'use these details when creating it.'}
+    elif edit.is_maintainer:
+        alert = 'Maintainer edit could not be applied'
+        detail = {'Reason': edit.validation_error or outcome.reason or 'Unknown.',
+                  'Action': '⚠️ Apply the edit to the associated ticket by hand.'}
+    elif edit.validation_error:
+        detail = {'Validation Error': f'❌ {edit.validation_error}',
+                  'Action': '⚠️ Ticket left unchanged - the edited details were rejected.'}
+    elif outcome.status == 'flagged':
+        alert = 'Submission repointed at different code'
+        detail = {'Ticket': f'{outcome.ticket_key} (unchanged)',
+                  'Action': '⚠️ Treat as a new submission - review has not been re-run '
+                            'and the ticket has NOT been updated.'}
+    elif outcome.status == 'updated':
+        detail = {'Ticket': outcome.ticket_key,
+                  'Updated': f'✅ {", ".join(outcome.applied)}'}
+    else:
+        detail = {'Action': '⚠️ Apply the edited details to the associated ticket.'}
+        if outcome.reason:
+            detail['Reason'] = outcome.reason
+
+    return {
+        'Alert': alert,
         'Extension': edit.title,
         'Issue': edit.issue_url,
         'Edited by': f'{edit.editor} ({edit.editor_access} access)',
-        **changed_fields(edit),
+        **changed_fields(edit, outcome),
+        **detail,
     }
-
-    if edit.is_maintainer:
-        payload['Alert'] = 'Maintainer edit could not be applied'
-        payload['Reason'] = edit.validation_error or outcome.reason or 'Unknown.'
-        payload['Action'] = '⚠️ Apply the edit to the associated ticket by hand.'
-    elif edit.validation_error:
-        payload['Validation Error'] = f'❌ {edit.validation_error}'
-        payload['Action'] = '⚠️ Ticket left unchanged - the edited details were rejected.'
-    elif outcome.status == 'flagged':
-        payload['Ticket'] = f'{outcome.ticket_key} (unchanged)'
-        payload['Action'] = ('⚠️ Treat as a new submission - review has not been re-run '
-                             'and the ticket has NOT been updated.')
-    elif outcome.status == 'updated':
-        payload['Ticket'] = outcome.ticket_key
-        payload['Updated'] = f'✅ {", ".join(outcome.applied)}'
-    else:
-        payload['Action'] = '⚠️ Apply the edited details to the associated ticket.'
-        if outcome.reason:
-            payload['Reason'] = outcome.reason
-
-    return payload
 
 
 def encode_payload(payload):
@@ -306,6 +253,8 @@ def report(outcome):
         print(f'::notice::Updated {outcome.ticket_key}: {", ".join(outcome.applied)}.')
     elif outcome.status == 'unchanged':
         print(f'::notice::{outcome.ticket_key} already matches the issue.')
+    elif outcome.status == 'absent':
+        print(f'::notice::{outcome.reason}')
     else:
         print(f'::warning::{outcome.reason}')
 
@@ -317,10 +266,7 @@ if __name__ == '__main__':
         print(f'::warning::{edit.validation_error}')
         outcome = Outcome('rejected')
     else:
-        jira = JiraClient(os.environ.get('JIRA_BASE_URL'),
-                          os.environ.get('JIRA_USER_EMAIL'),
-                          os.environ.get('JIRA_API_TOKEN'))
-        outcome = sync(jira, edit)
+        outcome = sync(jira.JiraClient.from_environment(), edit)
         report(outcome)
 
     payload = zoom_payload(edit, outcome)

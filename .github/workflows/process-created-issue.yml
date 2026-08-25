@@ -189,54 +189,25 @@ jobs:
         env:
           PRODUCT_COMPATIBILITY: ${{ needs.extract-issue-details.outputs.product_compatibility }}
 
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
       - name: Create Jira ticket
         id: create_jira
         if: |
           needs.extract-issue-details.outputs.error_message == '' &&
           needs.validate-submission.outputs.error_message == ''
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const title = process.env.TITLE;
-            const repoUrl = process.env.REPO_URL || '';
-            const issueUrl = context.payload.issue.html_url;
-
-            const jiraAuth = Buffer.from(`${process.env.JIRA_USER_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
-            const jiraHeaders = { 'Authorization': `Basic ${jiraAuth}`, 'Content-Type': 'application/json' };
-
-            // Create Jira ticket. The sanitized repository URL is recorded as the
-            // "bapp url" (customfield_10932); update subtasks are matched to this ticket by it.
-            const createResponse = await fetch(`${process.env.JIRA_BASE_URL}/rest/api/3/issue`, {
-              method: 'POST',
-              headers: jiraHeaders,
-              body: JSON.stringify({
-                fields: {
-                  project: { key: "BAPP" },
-                  summary: title,
-                  issuetype: { id: "10278" },
-                  customfield_10932: repoUrl,
-                  customfield_13486: issueUrl
-                }
-              })
-            });
-
-            if (!createResponse.ok) {
-              core.warning(`Jira API error: ${createResponse.status}`);
-
-              throw new Error(`Failed to create Jira ticket: ${createResponse.status}`);
-            }
-
-            const jiraIssue = await createResponse.json();
-            const jiraKey = jiraIssue.key;
-            core.debug(`Created Jira ticket: ${jiraKey}`);
-
-            core.setOutput('jira_key', jiraKey);
+        run: python3 .github/scripts/create_submission_ticket.py
         env:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
           REPO_URL: ${{ needs.validate-submission.outputs.normalized_url }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
 
       - name: Convert product compatibility format
         id: convert_products
@@ -364,102 +335,18 @@ jobs:
       has_comment: ${{ steps.prepare_comment.outputs.has_comment }}
 
     steps:
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
       - name: Create Jira ticket
         id: create_jira
         if: |
           needs.extract-issue-details.outputs.error_message == '' &&
           needs.validate-submission.outputs.error_message == ''
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const sourceUrl = process.env.SOURCE_URL || '';
-            const prUrl = process.env.PR_URL || '';
-            const version = (process.env.VERSION_NUMBER || '').trim();
-            const issueUrl = context.payload.issue.html_url;
-
-            // The parent ticket and subtask are created automatically only when there is
-            // exactly one matching parent. Anything else (no match, ambiguous match, or a
-            // Jira error) falls back to manual intervention: the team is alerted via Zoom
-            // and creates the ticket by hand, so this step never fails the submission.
-            const fallToManual = (reason) => {
-              core.warning(reason);
-              core.setOutput('status', 'manual');
-              core.setOutput('reason', reason);
-            };
-
-            try {
-              const jiraAuth = Buffer.from(`${process.env.JIRA_USER_EMAIL}:${process.env.JIRA_API_TOKEN}`).toString('base64');
-              const jiraHeaders = {
-                'Authorization': `Basic ${jiraAuth}`,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-              };
-
-              const escapeJql = (value) => (value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-
-              // Find the parent BAPP ticket by its "bapp url" field (customfield_10932).
-              const searchJql = async (operator) => {
-                const jql = `project = BAPP AND issuetype = 10278 AND cf[10932] ${operator} "${escapeJql(sourceUrl)}"`;
-                return fetch(`${process.env.JIRA_BASE_URL}/rest/api/3/search/jql`, {
-                  method: 'POST',
-                  headers: jiraHeaders,
-                  body: JSON.stringify({ jql, fields: ['customfield_10932'], maxResults: 50 })
-                });
-              };
-
-              // Prefer the "contains" operator; fall back to exact match if the field rejects it.
-              let searchResponse = await searchJql('~');
-              if (searchResponse.status === 400) {
-                searchResponse = await searchJql('=');
-              }
-              if (!searchResponse.ok) {
-                return fallToManual(`Jira search for the parent ticket failed: ${searchResponse.status}`);
-              }
-              const searchData = await searchResponse.json();
-              const issues = searchData.issues || [];
-
-              // Exact-match the bapp url field to guard against fuzzy "~" matches.
-              const normalize = (value) => (value || '').trim().replace(/\.git$/, '').replace(/\/+$/, '').toLowerCase();
-              const target = normalize(sourceUrl);
-              const matches = issues.filter(issue => normalize(issue.fields && issue.fields.customfield_10932) === target);
-
-              if (matches.length === 0) {
-                return fallToManual(`No parent BAPP ticket found with bapp url ${sourceUrl}.`);
-              }
-              if (matches.length > 1) {
-                return fallToManual(`Multiple parent BAPP tickets found (${matches.map(i => i.key).join(', ')}) for bapp url ${sourceUrl}.`);
-              }
-              const parentKey = matches[0].key;
-              core.info(`Parent BAPP ticket: ${parentKey}`);
-
-              // Create the "BApp update" subtask under the parent ticket.
-              const createResponse = await fetch(`${process.env.JIRA_BASE_URL}/rest/api/3/issue`, {
-                method: 'POST',
-                headers: jiraHeaders,
-                body: JSON.stringify({
-                  fields: {
-                    project: { key: "BAPP" },
-                    parent: { key: parentKey },
-                    summary: `v${version}`,
-                    issuetype: { id: "10279" },
-                    customfield_10932: prUrl,
-                    customfield_13486: issueUrl
-                  }
-                })
-              });
-
-              if (!createResponse.ok) {
-                const errorText = await createResponse.text();
-                return fallToManual(`Failed to create BApp update subtask: ${createResponse.status} ${errorText}`);
-              }
-
-              const subtask = await createResponse.json();
-              core.info(`Created BApp update subtask: ${subtask.key}`);
-              core.setOutput('status', 'automated');
-              core.setOutput('jira_key', subtask.key);
-            } catch (error) {
-              fallToManual(`Unexpected error while creating the update ticket: ${error.message}`);
-            }
+        run: python3 .github/scripts/create_update_ticket.py
         env:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
           JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
@@ -467,6 +354,7 @@ jobs:
           SOURCE_URL: ${{ needs.validate-submission.outputs.source_repo_url }}
           PR_URL: ${{ needs.extract-issue-details.outputs.url }}
           VERSION_NUMBER: ${{ needs.extract-issue-details.outputs.version_number }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
 
       - name: Checkout repository
         if: steps.create_jira.outputs.status == 'automated'
