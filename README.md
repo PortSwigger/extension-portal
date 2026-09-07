@@ -49,6 +49,12 @@ If your extension requires changes, we will leave feedback on the issue and clos
 
 When the changes are complete, comment `/reopen` on the closed issue to add it back into the review queue.
 
+## Closing your submission
+
+Closing an issue takes your submission out of the review queue. To withdraw a submission, close it as **Not planned**. You can comment `/reopen` at any point to put it back into the queue.
+
+We use **Completed** to record that our team has finished reviewing a submission, so if an issue is closed as **Completed** before then, we adjust the reason to **Not planned**. The issue stays closed either way.
+
 ## Questions or issues?
 
 If you have questions or need clarification, please contact us at [bapps@portswigger.net](mailto:bapps@portswigger.net).

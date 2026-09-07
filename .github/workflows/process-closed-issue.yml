@@ -1,0 +1,73 @@
+name: Process closed issue
+
+# Guards the close reason. Closed does not mean finished here - submissions are
+# closed to park them during feedback - so "Completed" is reserved for a
+# maintainer who has handled the submission. A reporter closing their own issue
+# that way has it corrected to "Not planned", and is told the difference.
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  issues: write
+  contents: read
+
+concurrency:
+  group: portal-issue-${{ github.event.issue.user.login }}
+  cancel-in-progress: false
+
+jobs:
+  check-close-authority:
+    if: github.event.issue.state_reason == 'completed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      needs_correction: ${{ steps.authority.outputs.needs_correction }}
+
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Establish whether a maintainer closed the issue
+        id: authority
+        run: python3 .github/scripts/check_close_authority.py
+        env:
+          CLOSER_LOGIN: ${{ github.event.sender.login }}
+          CLOSER_TYPE: ${{ github.event.sender.type }}
+          AUTHOR_LOGIN: ${{ github.event.issue.user.login }}
+          AUTHOR_ASSOCIATION: ${{ github.event.issue.author_association }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  correct-close-reason:
+    needs: check-close-authority
+    if: needs.check-close-authority.outputs.needs_correction == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+
+    steps:
+      - name: Re-close as Not planned
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await github.rest.issues.update({
+              ...context.repo,
+              issue_number: context.issue.number,
+              state: 'closed',
+              state_reason: 'not_planned'
+            });
+
+            core.info('Corrected the close reason to "Not planned".');
+
+  notify-reporter:
+    needs: correct-close-reason
+    if: needs.correct-close-reason.result == 'success'
+    uses: ./.github/workflows/common-post-issue-comment.yml
+    with:
+      issue_number: ${{ github.event.issue.number }}
+      template_key: close-issue.reason-corrected

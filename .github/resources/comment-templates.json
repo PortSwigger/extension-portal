@@ -84,6 +84,13 @@
       "Please try commenting `/resubmit` again shortly. If the problem persists, contact [bapps@portswigger.net](mailto:bapps@portswigger.net)."
     ]
   },
+  "close-issue": {
+    "reason-corrected": [
+      "ℹ️ We've adjusted the close reason on this issue to **Not planned** — we use **Completed** to record that our team has finished reviewing a submission.",
+      "",
+      "Comment `/reopen` if you'd like us to pick it back up."
+    ]
+  },
   "reopen-issue": {
     "archived": [
       "⚠️ This issue appears to be archived and has been removed from the project board.",
