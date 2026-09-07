@@ -30,6 +30,15 @@ To submit an update for an existing extension on the BApp Store:
 
 Note: Updates are accepted from the parent repository of the PortSwigger fork.
 
+## Submitting with an AI agent
+
+If you are using an AI agent to submit on your behalf, point it at
+[AGENTS.md](AGENTS.md). It contains the exact issue body and `gh` command for
+both forms.
+
+Submissions are parsed literally, so an issue that reads correctly to a human
+but does not match that format is closed with an explanation of what to fix.
+
 ## Tracking your submission
 
 All submissions are tracked in our [Extension submissions](https://github.com/orgs/PortSwigger/projects/1) GitHub project, where you can monitor the status of your submission through the review process.

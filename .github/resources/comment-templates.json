@@ -16,7 +16,9 @@
       "",
       "---",
       "",
-      "Once you've resolved the above, comment `/resubmit` and we'll run your submission through the checks again."
+      "Once you've resolved the above, comment `/resubmit` and we'll run your submission through the checks again.",
+      "",
+      "Submitting programmatically? [AGENTS.md](https://github.com/PortSwigger/extension-portal/blob/main/AGENTS.md) has the exact issue body and `gh` command for both forms."
     ],
     "failure-generic": [
       "❌ Submission failed.",
@@ -50,7 +52,9 @@
       "",
       "---",
       "",
-      "Once you've resolved the above, simply make a comment starting with `/reopen` and we'll put your update back into the review process."
+      "Once you've resolved the above, simply make a comment starting with `/reopen` and we'll put your update back into the review process.",
+      "",
+      "Submitting programmatically? [AGENTS.md](https://github.com/PortSwigger/extension-portal/blob/main/AGENTS.md) has the exact issue body and `gh` command for both forms."
     ],
     "failure-generic": [
       "❌ Update submission failed.",
@@ -92,6 +96,15 @@
       "✅ This issue has been reopened.",
       "",
       "We'll review your changes and move your ticket to the appropriate stage at the earliest opportunity."
+    ]
+  },
+  "unrecognised-submission": {
+    "no-form-fields": [
+      "❌ This issue doesn't look like an extension submission, so it hasn't been added to the review queue.",
+      "",
+      "Please open a new issue using the [New extension submission](https://github.com/PortSwigger/extension-portal/issues/new?template=01-submit-extension.yml) or [Update for existing extension](https://github.com/PortSwigger/extension-portal/issues/new?template=02-submit-update.yml) form. If you're submitting programmatically, [AGENTS.md](https://github.com/PortSwigger/extension-portal/blob/main/AGENTS.md) has the exact issue body to send.",
+      "",
+      "If you meant to ask us something rather than submit an extension, contact [bapps@portswigger.net](mailto:bapps@portswigger.net)."
     ]
   }
 }

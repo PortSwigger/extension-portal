@@ -17,8 +17,79 @@ jobs:
   extract-issue-details:
     if: |
       github.event.issue.type.name == 'Extension' ||
-      github.event.issue.type.name == 'Update'
+      github.event.issue.type.name == 'Update' ||
+      github.event.issue.type.name == ''
     uses: ./.github/workflows/common-extract-issue-details.yml
+
+  record-inferred-type:
+    needs: extract-issue-details
+    if: |
+      needs.extract-issue-details.result == 'success' &&
+      github.event.issue.type.name == '' &&
+      needs.extract-issue-details.outputs.github_issue_type != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Record the inferred issue type
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const type = process.env.ISSUE_TYPE;
+            await github.rest.issues.update({
+              ...context.repo,
+              issue_number: context.issue.number,
+              type,
+            });
+
+            // GitHub drops the type without push access instead of failing.
+            const { data } = await github.rest.issues.get({
+              ...context.repo,
+              issue_number: context.issue.number,
+            });
+            if (data.type?.name === type) {
+              core.info(`Recorded issue type "${type}".`);
+            } else {
+              core.warning(
+                `Issue type was not recorded as "${type}", so /resubmit and edit ` +
+                `syncing will not work for this issue.`);
+            }
+        env:
+          ISSUE_TYPE: ${{ needs.extract-issue-details.outputs.github_issue_type }}
+
+  report-unrecognised-issue:
+    needs: extract-issue-details
+    if: |
+      needs.extract-issue-details.result == 'success' &&
+      needs.extract-issue-details.outputs.type == '' &&
+      github.event.issue.author_association != 'OWNER' &&
+      github.event.issue.author_association != 'MEMBER' &&
+      github.event.issue.author_association != 'COLLABORATOR'
+    uses: ./.github/workflows/common-post-issue-comment.yml
+    with:
+      issue_number: ${{ github.event.issue.number }}
+      template_key: unrecognised-submission.no-form-fields
+
+  close-unrecognised-issue:
+    needs: report-unrecognised-issue
+    if: needs.report-unrecognised-issue.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Close issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed',
+              state_reason: 'not_planned'
+            });
 
   validate-submission:
     needs: extract-issue-details

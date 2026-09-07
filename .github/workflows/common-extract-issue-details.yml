@@ -28,6 +28,9 @@ on:
       product_compatibility:
         description: 'JSON array of the selected compatible products'
         value: ${{ jobs.extract.outputs.product_compatibility }}
+      github_issue_type:
+        description: 'GitHub issue type name matching the submission type, for an issue that arrived without one'
+        value: ${{ jobs.extract.outputs.github_issue_type }}
 
 permissions:
   contents: read
@@ -44,6 +47,7 @@ jobs:
       title: ${{ steps.sanitize.outputs.title }}
       error_message: ${{ steps.sanitize.outputs.error_message }}
       product_compatibility: ${{ steps.sanitize.outputs.product_compatibility }}
+      github_issue_type: ${{ steps.extract.outputs.github_issue_type }}
 
     steps:
       - name: Checkout scripts
@@ -63,7 +67,7 @@ jobs:
 
       - name: Sanitize inputs
         id: sanitize
-        uses: PortSwigger/shared-workflows/sanitize-inputs@5ac869b4e30a6d1ee4b6e65c482eb05ef566d550 # v1.0.4
+        uses: PortSwigger/shared-workflows/sanitize-inputs@eb658005358e539ac0349f7c10f3073d1da91001 # v1.0.6
         with:
           type: ${{ steps.extract.outputs.type }}
           title: ${{ steps.extract.outputs.title }}
@@ -71,3 +75,4 @@ jobs:
           url: ${{ steps.extract.outputs.url }}
           version_number: ${{ steps.extract.outputs.version_number }}
           product_compatibility: ${{ steps.extract.outputs.product_compatibility }}
+          confirmations: ${{ steps.extract.outputs.confirmations }}
