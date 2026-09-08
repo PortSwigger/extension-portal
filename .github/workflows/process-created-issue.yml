@@ -58,7 +58,7 @@ jobs:
         env:
           ISSUE_TYPE: ${{ needs.extract-issue-details.outputs.github_issue_type }}
 
-  report-unrecognised-issue:
+  handle-unrecognised-issue:
     needs: extract-issue-details
     if: |
       needs.extract-issue-details.result == 'success' &&
@@ -66,30 +66,28 @@ jobs:
       github.event.issue.author_association != 'OWNER' &&
       github.event.issue.author_association != 'MEMBER' &&
       github.event.issue.author_association != 'COLLABORATOR'
-    uses: ./.github/workflows/common-post-issue-comment.yml
-    with:
-      issue_number: ${{ github.event.issue.number }}
-      template_key: unrecognised-submission.no-form-fields
-
-  close-unrecognised-issue:
-    needs: report-unrecognised-issue
-    if: needs.report-unrecognised-issue.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       issues: write
+      contents: read
     steps:
-      - name: Close issue
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      - name: Checkout actions
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          script: |
-            await github.rest.issues.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              state: 'closed',
-              state_reason: 'not_planned'
-            });
+          sparse-checkout: .github/actions
+          sparse-checkout-cone-mode: false
+
+      - name: Explain that the issue was not recognised
+        uses: ./.github/actions/post-issue-comment
+        with:
+          issue_number: ${{ github.event.issue.number }}
+          template_key: unrecognised-submission.no-form-fields
+
+      - name: Close issue
+        uses: ./.github/actions/close-issue
+        with:
+          issue_number: ${{ github.event.issue.number }}
 
   validate-submission:
     needs: extract-issue-details
@@ -227,10 +225,6 @@ jobs:
     timeout-minutes: 10
     outputs:
       zoom_payload: ${{ steps.prepare_zoom.outputs.payload }}
-      template_key: ${{ steps.prepare_comment.outputs.template_key }}
-      error_message: ${{ steps.prepare_comment.outputs.error_message }}
-      should_close: ${{ steps.prepare_comment.outputs.should_close }}
-      has_comment: ${{ steps.prepare_comment.outputs.has_comment }}
 
     steps:
       - name: Apply product compatibility labels
@@ -260,10 +254,12 @@ jobs:
         env:
           PRODUCT_COMPATIBILITY: ${{ needs.extract-issue-details.outputs.product_compatibility }}
 
-      - name: Checkout scripts
+      - name: Checkout scripts and actions
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/scripts
+            .github/actions
           sparse-checkout-cone-mode: false
 
       - name: Create Jira ticket
@@ -306,10 +302,6 @@ jobs:
             core.info(`Converted products: ${convertedProducts}`);
         env:
           PRODUCT_COMPATIBILITY: ${{ needs.extract-issue-details.outputs.product_compatibility }}
-
-      - name: Checkout repository
-        if: steps.convert_products.outcome == 'success'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Trigger review workflow
         id: review_workflow
@@ -358,7 +350,6 @@ jobs:
             core.setOutput('template_key', templateKey);
             core.setOutput('error_message', errorMessage);
             core.setOutput('should_close', shouldClose.toString());
-            core.setOutput('has_comment', 'true');
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
           VALIDATE_ERROR: ${{ needs.validate-submission.outputs.error_message }}
@@ -391,6 +382,26 @@ jobs:
           JIRA_KEY: ${{ steps.create_jira.outputs.jira_key }}
           VALIDATE_ERROR: ${{ needs.validate-submission.outputs.error_message }}
 
+      - name: Post outcome comment
+        id: post_comment
+        if: |
+          !cancelled() &&
+          steps.prepare_comment.outputs.template_key != ''
+        uses: ./.github/actions/post-issue-comment
+        with:
+          issue_number: ${{ github.event.issue.number }}
+          template_key: ${{ steps.prepare_comment.outputs.template_key }}
+          error_message: ${{ steps.prepare_comment.outputs.error_message }}
+
+      - name: Close issue
+        if: |
+          !cancelled() &&
+          steps.post_comment.outcome == 'success' &&
+          steps.prepare_comment.outputs.should_close == 'true'
+        uses: ./.github/actions/close-issue
+        with:
+          issue_number: ${{ github.event.issue.number }}
+
   submit-update:
     needs: [extract-issue-details, validate-submission]
     if: |
@@ -400,16 +411,14 @@ jobs:
     timeout-minutes: 10
     outputs:
       zoom_payload: ${{ steps.prepare_zoom.outputs.payload }}
-      template_key: ${{ steps.prepare_comment.outputs.template_key }}
-      error_message: ${{ steps.prepare_comment.outputs.error_message }}
-      should_close: ${{ steps.prepare_comment.outputs.should_close }}
-      has_comment: ${{ steps.prepare_comment.outputs.has_comment }}
 
     steps:
-      - name: Checkout scripts
+      - name: Checkout scripts and actions
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/scripts
+            .github/actions
           sparse-checkout-cone-mode: false
 
       - name: Create Jira ticket
@@ -426,10 +435,6 @@ jobs:
           PR_URL: ${{ needs.extract-issue-details.outputs.url }}
           VERSION_NUMBER: ${{ needs.extract-issue-details.outputs.version_number }}
           ISSUE_URL: ${{ github.event.issue.html_url }}
-
-      - name: Checkout repository
-        if: steps.create_jira.outputs.status == 'automated'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Trigger review workflow
         id: review_workflow
@@ -534,47 +539,30 @@ jobs:
             core.setOutput('template_key', templateKey);
             core.setOutput('error_message', errorMessage);
             core.setOutput('should_close', shouldClose.toString());
-            core.setOutput('has_comment', 'true');
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
           VALIDATE_ERROR: ${{ needs.validate-submission.outputs.error_message }}
           UPDATE_STATUS: ${{ steps.create_jira.outputs.status }}
 
-  post-comment:
-    needs: [extract-issue-details, submit-extension, submit-update]
-    if: |
-      !cancelled() &&
-      (needs.submit-extension.outputs.has_comment == 'true' ||
-       needs.submit-update.outputs.has_comment == 'true')
-    uses: ./.github/workflows/common-post-issue-comment.yml
-    with:
-      issue_number: ${{ github.event.issue.number }}
-      template_key: ${{ needs.submit-extension.outputs.template_key || needs.submit-update.outputs.template_key }}
-      error_message: ${{ needs.submit-extension.outputs.error_message || needs.submit-update.outputs.error_message }}
-
-  close-issue:
-    needs: [extract-issue-details, submit-extension, submit-update, post-comment]
-    if: |
-      !cancelled() &&
-      needs.post-comment.result == 'success' &&
-      (needs.submit-extension.outputs.should_close == 'true' ||
-       needs.submit-update.outputs.should_close == 'true')
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      issues: write
-    steps:
-      - name: Close issue
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      - name: Post outcome comment
+        id: post_comment
+        if: |
+          !cancelled() &&
+          steps.prepare_comment.outputs.template_key != ''
+        uses: ./.github/actions/post-issue-comment
         with:
-          script: |
-            await github.rest.issues.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              state: 'closed',
-              state_reason: 'not_planned'
-            });
+          issue_number: ${{ github.event.issue.number }}
+          template_key: ${{ steps.prepare_comment.outputs.template_key }}
+          error_message: ${{ steps.prepare_comment.outputs.error_message }}
+
+      - name: Close issue
+        if: |
+          !cancelled() &&
+          steps.post_comment.outcome == 'success' &&
+          steps.prepare_comment.outputs.should_close == 'true'
+        uses: ./.github/actions/close-issue
+        with:
+          issue_number: ${{ github.event.issue.number }}
 
   notify-zoom:
     needs: [extract-issue-details, submit-extension, submit-update]

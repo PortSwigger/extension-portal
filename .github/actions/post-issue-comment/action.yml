@@ -1,0 +1,61 @@
+name: Post issue comment
+description: >-
+  Post a templated comment to an issue, rendered from the comment-templates.json
+  bundled alongside this action.
+
+inputs:
+  issue_number:
+    description: Issue number to comment on.
+    required: true
+  template_key:
+    description: 'Template key (e.g. "extension-submission.success").'
+    required: true
+  error_message:
+    description: Error message for template substitution.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Post comment to issue
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      with:
+        script: |
+          const { readFileSync } = require('fs');
+
+          // Load templates and get the specified one
+          const templates = JSON.parse(readFileSync(process.env.TEMPLATE_FILE_PATH, 'utf8'));
+          const [category, type] = process.env.TEMPLATE_KEY.split('.');
+          const template = templates[category]?.[type];
+
+          if (!template) {
+            throw new Error(`Template not found: ${process.env.TEMPLATE_KEY}`);
+          }
+
+          // Escape markdown special characters in user-influenced values
+          const escapeMarkdown = (text) => text
+            .replace(/\\/g, '\\\\')
+            .replace(/[*_`[\]]/g, c => `\\${c}`);
+
+          // Join array into multiline string and render with environment variable substitution
+          const body = template
+            .join('\n')
+            .replace(/\{\{(\w+)\}\}/g, (_, key) => {
+              const val = process.env[key] || '';
+              return key === 'ERROR_MESSAGE' ? escapeMarkdown(val) : val;
+            });
+
+          // Post comment
+          await github.rest.issues.createComment({
+            ...context.repo,
+            issue_number: parseInt(process.env.ISSUE_NUMBER),
+            body
+          });
+
+          core.info(`Posted comment to issue #${process.env.ISSUE_NUMBER} using template: ${process.env.TEMPLATE_KEY}`);
+      env:
+        TEMPLATE_FILE_PATH: ${{ github.action_path }}/comment-templates.json
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+        TEMPLATE_KEY: ${{ inputs.template_key }}
+        ERROR_MESSAGE: ${{ inputs.error_message }}

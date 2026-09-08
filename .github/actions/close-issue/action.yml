@@ -1,0 +1,33 @@
+name: Close issue
+description: >-
+  Close an issue with an explicit state reason. Closed does not mean finished in
+  this repo - submissions are closed to park them - so the reason is always set
+  deliberately rather than left to GitHub's default.
+
+inputs:
+  issue_number:
+    description: Issue number to close.
+    required: true
+  state_reason:
+    description: 'Why the issue is being closed: not_planned or completed.'
+    required: false
+    default: not_planned
+
+runs:
+  using: composite
+  steps:
+    - name: Close issue
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      with:
+        script: |
+          await github.rest.issues.update({
+            ...context.repo,
+            issue_number: parseInt(process.env.ISSUE_NUMBER),
+            state: 'closed',
+            state_reason: process.env.STATE_REASON
+          });
+
+          core.info(`Closed issue #${process.env.ISSUE_NUMBER} as "${process.env.STATE_REASON}".`);
+      env:
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+        STATE_REASON: ${{ inputs.state_reason }}

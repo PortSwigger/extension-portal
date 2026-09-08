@@ -27,10 +27,14 @@ jobs:
     outputs:
       zoom_payload: ${{ steps.prepare_payload.outputs.payload }}
       should_notify: ${{ steps.prepare_payload.outputs.should_notify }}
-      template_key: ${{ steps.check_archived.outputs.template_key || steps.reopen_success.outputs.template_key || '' }}
-      should_post_comment: ${{ steps.check_archived.outputs.template_key != '' || steps.reopen_success.outputs.template_key != '' }}
 
     steps:
+      - name: Checkout actions
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/actions
+          sparse-checkout-cone-mode: false
+
       - name: Generate GitHub App token
         id: generate_token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -131,6 +135,15 @@ jobs:
             core.info('Issue reopened successfully');
             core.setOutput('template_key', 'reopen-issue.reopened');
 
+      - name: Report the outcome
+        if: |
+          steps.check_archived.outputs.template_key != '' ||
+          steps.reopen_success.outputs.template_key != ''
+        uses: ./.github/actions/post-issue-comment
+        with:
+          issue_number: ${{ github.event.issue.number }}
+          template_key: ${{ steps.check_archived.outputs.template_key || steps.reopen_success.outputs.template_key }}
+
   notify-zoom:
     needs: reopen-issue
     if: needs.reopen-issue.outputs.should_notify == 'true'
@@ -141,14 +154,6 @@ jobs:
       ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
       ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
 
-  post-comment:
-    needs: reopen-issue
-    if: needs.reopen-issue.outputs.should_post_comment == 'true'
-    uses: ./.github/workflows/common-post-issue-comment.yml
-    with:
-      issue_number: ${{ github.event.issue.number }}
-      template_key: ${{ needs.reopen-issue.outputs.template_key }}
-
   resubmit-issue:
     if: |
       github.event.issue.pull_request == null &&
@@ -157,13 +162,14 @@ jobs:
     timeout-minutes: 5
     outputs:
       proceed: ${{ steps.decide.outputs.proceed }}
-      template_key: ${{ steps.decide.outputs.template_key }}
 
     steps:
-      - name: Checkout scripts
+      - name: Checkout scripts and actions
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/scripts
+            .github/actions
           sparse-checkout-cone-mode: false
 
       - name: Decide whether to resubmit
@@ -179,13 +185,14 @@ jobs:
           ISSUE_TYPE_NAME: ${{ github.event.issue.type.name }}
           ISSUE_URL: ${{ github.event.issue.html_url }}
 
-  resubmit-reject-comment:
-    needs: resubmit-issue
-    if: needs.resubmit-issue.outputs.proceed == 'false' && needs.resubmit-issue.outputs.template_key != ''
-    uses: ./.github/workflows/common-post-issue-comment.yml
-    with:
-      issue_number: ${{ github.event.issue.number }}
-      template_key: ${{ needs.resubmit-issue.outputs.template_key }}
+      - name: Explain why the resubmission was rejected
+        if: |
+          steps.decide.outputs.proceed == 'false' &&
+          steps.decide.outputs.template_key != ''
+        uses: ./.github/actions/post-issue-comment
+        with:
+          issue_number: ${{ github.event.issue.number }}
+          template_key: ${{ steps.decide.outputs.template_key }}
 
   resubmit-reopen:
     needs: resubmit-issue
