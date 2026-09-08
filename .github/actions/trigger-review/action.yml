@@ -57,22 +57,14 @@ runs:
         ISSUE_URL: ${{ inputs.issue_url }}
         IS_UPDATE: ${{ inputs.is_update }}
       run: |
-        # Build JSON payload using jq to safely escape all values
-        payload=$(jq -n \
-          --arg ref "$REF" \
-          --arg extension_name "$EXTENSION_NAME" \
-          --arg target_repo_url "$TARGET_REPO_URL" \
-          --arg compatible_products "$COMPATIBLE_PRODUCTS" \
-          --arg jira_ticket "$JIRA_TICKET" \
-          --arg issue_url "$ISSUE_URL" \
-          --arg is_update "$IS_UPDATE" \
-          '{"ref": $ref, "inputs": {"extension_name": $extension_name, "target_repo_url": $target_repo_url, "compatible_products": $compatible_products, "jira_ticket": $jira_ticket, "issue_url": $issue_url, "is_update": $is_update}}')
-
-        curl -sS -f -X POST \
-          -H "Accept: application/vnd.github+json" \
-          -H "Authorization: Bearer $GH_TOKEN" \
-          -H "Content-Type: application/json" \
-          https://api.github.com/repos/$OWNER/$REPO/actions/workflows/$WORKFLOW_FILE/dispatches \
-          -d "$payload"
+        gh workflow run "$WORKFLOW_FILE" \
+          --repo "$OWNER/$REPO" \
+          --ref "$REF" \
+          -f extension_name="$EXTENSION_NAME" \
+          -f target_repo_url="$TARGET_REPO_URL" \
+          -f compatible_products="$COMPATIBLE_PRODUCTS" \
+          -f jira_ticket="$JIRA_TICKET" \
+          -f issue_url="$ISSUE_URL" \
+          -f is_update="$IS_UPDATE"
 
         echo "Workflow dispatch triggered successfully"
