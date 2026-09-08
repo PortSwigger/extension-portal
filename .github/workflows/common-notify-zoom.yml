@@ -16,40 +16,53 @@ on:
 permissions:
   contents: read
 
+# This stays a separate job rather than becoming a composite action so that the
+# third-party HTTP action is the only thing in the pipeline that runs beside
+# secrets, and sees only the two Zoom ones. workflow_call passes nothing that is
+# not listed above, so that isolation is enforced by GitHub rather than by us
+# remembering. Keep it that way when adding callers.
+
 jobs:
   notify:
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
-      - name: Send Zoom webhook notification
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const encodedPayload = process.env.PAYLOAD;
-
-            // Decode base64 payload
-            const payloadString = Buffer.from(encodedPayload, 'base64').toString('utf-8');
-            const payload = JSON.parse(payloadString);
-
-            const webhookUrl = `${process.env.ZOOM_WEBHOOK_URL}?format=fields`;
-
-            const response = await fetch(webhookUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': process.env.ZOOM_VERIFICATION_TOKEN
-              },
-              body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) {
-              const errorText = await response.text();
-              core.warning(`Zoom webhook error: ${response.status} - ${errorText}`);
-            } else {
-              core.info('Successfully sent webhook notification to Zoom');
-            }
+      # Callers base64 the payload so that secret masking cannot corrupt
+      # fragments of it on the way between jobs. Decode it here, at the point
+      # of use, so the plain JSON never crosses a job boundary.
+      - name: Decode payload
+        id: payload
         env:
-          ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
-          ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
-          PAYLOAD: ${{ inputs.payload }}
+          ENCODED: ${{ inputs.payload }}
+        run: |
+          delimiter="EOF_$(openssl rand -hex 8)"
+          {
+            echo "json<<${delimiter}"
+            printf '%s' "$ENCODED" | base64 -d
+            echo
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Zoom wants the token in a bare Authorization header, so it goes through
+      # customHeaders - bearerToken would prefix it with "Bearer ".
+      - name: Send Zoom webhook notification
+        id: zoom
+        continue-on-error: true
+        uses: fjogeleit/http-request-action@551353b829c3646756b2ec2b3694f819d7957495 # v2.0.0
+        with:
+          url: '${{ secrets.ZOOM_WEBHOOK_URL }}?format=fields'
+          method: POST
+          contentType: application/json
+          customHeaders: '{"Authorization": "${{ secrets.ZOOM_VERIFICATION_TOKEN }}"}'
+          data: ${{ steps.payload.outputs.json }}
+          timeout: '10000'
+          retry: '2'
+          retryWait: '2000'
+
+      # A missed notification must never fail a submission, so the request runs
+      # with continue-on-error and its failure is reported as an annotation.
+      - name: Warn if the notification failed
+        if: steps.zoom.outcome != 'success'
+        run: |
+          echo "::warning::Zoom webhook notification failed - see the previous step for the response."
