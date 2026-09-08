@@ -16,6 +16,8 @@ from urllib import error, request
 
 from github_urls import normalize_url
 
+HTTP_TIMEOUT_SECONDS = 60
+
 PROJECT = 'BAPP'
 SUBMISSION_ISSUE_TYPE = '10278'
 UPDATE_SUBTASK_ISSUE_TYPE = '10279'
@@ -53,7 +55,7 @@ class JiraClient:
                               data=json.dumps(payload).encode())
         for name, value in self._headers.items():
             req.add_header(name, value)
-        with request.urlopen(req) as response:
+        with request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as response:
             body = response.read().decode()
         return json.loads(body) if body else {}
 

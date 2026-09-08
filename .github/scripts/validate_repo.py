@@ -11,6 +11,8 @@ from urllib import request, error
 from github_actions_utils import set_output
 from github_urls import repository_parts
 
+HTTP_TIMEOUT_SECONDS = 60
+
 def extract_owner_repo(url):
     """Extract owner and repo from a GitHub repository URL"""
     parts = repository_parts(url)
@@ -38,7 +40,7 @@ def validate_repo(owner, repo, github_token=None):
             req.add_header('Authorization', f'token {github_token}')
         req.add_header('Accept', 'application/vnd.github.v3+json')
 
-        with request.urlopen(req) as response:
+        with request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as response:
             data = json.loads(response.read().decode())
 
             if data.get('fork'):

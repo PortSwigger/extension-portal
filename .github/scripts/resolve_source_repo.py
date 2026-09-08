@@ -20,6 +20,8 @@ from urllib import request, error
 from github_actions_utils import set_output
 from github_urls import normalize_url, pull_request_parts
 
+HTTP_TIMEOUT_SECONDS = 60
+
 def extract_pr_ref(url):
     """Extract owner, repo and pull request number from a GitHub pull request URL."""
     parts = pull_request_parts(url)
@@ -37,7 +39,7 @@ def github_api_get(api_url, github_token=None):
     req.add_header('Accept', 'application/vnd.github.v3+json')
 
     try:
-        with request.urlopen(req) as response:
+        with request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as response:
             return json.loads(response.read().decode())
     except error.HTTPError as e:
         if e.code == 404:

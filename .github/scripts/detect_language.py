@@ -16,6 +16,8 @@ from urllib import request, error
 
 from github_actions_utils import set_output
 
+HTTP_TIMEOUT_SECONDS = 60
+
 
 SUPPORTED_LANGUAGES = {'java', 'kotlin', 'python', 'ruby'}
 
@@ -39,7 +41,7 @@ def fetch_languages(owner, repo, github_token=None):
     })
 
     try:
-        with request.urlopen(req) as response:
+        with request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as response:
             return json.loads(response.read().decode())
     except error.HTTPError as e:
         if e.code == 404:

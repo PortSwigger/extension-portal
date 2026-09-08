@@ -18,6 +18,8 @@ from urllib.parse import quote
 
 from github_actions_utils import output_flag, set_output
 
+HTTP_TIMEOUT_SECONDS = 60
+
 WRITE_ROLES = frozenset({'admin', 'maintain', 'write'})
 
 UNVERIFIED_ACCESS_WARNING = (
@@ -65,7 +67,7 @@ def github_api_get(api_url, github_token=None):
     if github_token:
         req.add_header('Authorization', f'token {github_token}')
     req.add_header('Accept', 'application/vnd.github.v3+json')
-    with request.urlopen(req) as response:
+    with request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as response:
         return json.loads(response.read().decode())
 
 
