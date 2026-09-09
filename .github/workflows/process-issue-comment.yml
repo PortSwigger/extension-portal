@@ -24,6 +24,7 @@ jobs:
       github.event.issue.state == 'closed' &&
       startsWith(github.event.comment.body, '/reopen')
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       zoom_payload: ${{ steps.prepare_payload.outputs.payload }}
       should_notify: ${{ steps.prepare_payload.outputs.should_notify }}
