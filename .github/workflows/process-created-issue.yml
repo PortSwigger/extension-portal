@@ -4,6 +4,21 @@ on:
   issues:
     types: [opened]
   workflow_call:
+    secrets:
+      JIRA_BASE_URL:
+        required: true
+      JIRA_USER_EMAIL:
+        required: true
+      JIRA_API_TOKEN:
+        required: true
+      PROJECT_ACCESS_APP_ID:
+        required: true
+      PROJECT_ACCESS_PRIVATE_KEY:
+        required: true
+      ZOOM_WEBHOOK_URL:
+        required: true
+      ZOOM_VERIFICATION_TOKEN:
+        required: true
 
 permissions:
   issues: write

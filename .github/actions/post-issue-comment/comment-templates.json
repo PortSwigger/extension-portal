@@ -92,13 +92,6 @@
     ]
   },
   "reopen-issue": {
-    "archived": [
-      "⚠️ This issue appears to be archived and has been removed from the project board.",
-      "",
-      "Our team has been notified and will manually restore it before reopening.",
-      "",
-      "Please allow some time for this to be processed."
-    ],
     "reopened": [
       "✅ This issue has been reopened.",
       "",

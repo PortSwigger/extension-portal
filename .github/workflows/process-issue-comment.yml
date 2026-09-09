@@ -27,13 +27,14 @@ jobs:
     timeout-minutes: 5
     outputs:
       zoom_payload: ${{ steps.prepare_payload.outputs.payload }}
-      should_notify: ${{ steps.prepare_payload.outputs.should_notify }}
 
     steps:
-      - name: Checkout actions
+      - name: Checkout scripts and actions
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: .github/actions
+          sparse-checkout: |
+            .github/scripts
+            .github/actions
           sparse-checkout-cone-mode: false
 
       - name: Generate GitHub App token
@@ -43,117 +44,45 @@ jobs:
           app-id: ${{ secrets.PROJECT_ACCESS_APP_ID }}
           private-key: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
 
-      - name: Check if issue is archived
-        id: check_archived
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          github-token: ${{ steps.generate_token.outputs.token }}
-          script: |
-            try {
-              // Query project items for this issue
-              const result = await github.graphql(`
-                query($issueId: ID!) {
-                  node(id: $issueId) {
-                    ... on Issue {
-                      projectItems(first: 10) {
-                        nodes {
-                          isArchived
-                          project {
-                            ... on ProjectV2 {
-                              number
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              `, { issueId: context.payload.issue.node_id });
+      - name: Reopen the issue and restore it to the board
+        id: reopen
+        run: python3 .github/scripts/reopen_issue.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROJECT_TOKEN: ${{ steps.generate_token.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
+          PROJECT_OWNER: ${{ github.repository_owner }}
 
-              const node = result.node;
-
-              // Find the project item for project #1
-              const projectItem = node.projectItems.nodes.find(
-                item => item.project.number === 1
-              );
-
-              // If not found on project board OR explicitly archived, treat as archived
-              const isArchived = !projectItem || projectItem.isArchived;
-
-              core.setOutput('is_archived', String(isArchived));
-
-              if (isArchived) {
-                const reason = !projectItem
-                  ? 'Issue not found on project board'
-                  : 'Issue is archived on project board';
-                core.info(reason);
-
-                core.setOutput('template_key', 'reopen-issue.archived');
-              } else {
-                core.info('Issue is on the project board and not archived');
-              }
-            } catch (error) {
-              core.warning(`Unable to check project status: ${error.message}`);
-              core.setOutput('is_archived', 'unknown');
-            }
-
-      - name: Prepare Zoom notification payload
-        id: prepare_payload
-        if: steps.check_archived.outputs.is_archived == 'true'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const issueNumber = context.issue.number;
-            const issueTitle = context.payload.issue.title;
-            const issueUrl = context.payload.issue.html_url;
-            const requester = context.payload.comment.user.login;
-
-            const payload = {
-              "Alert": "Archived Issue Reopen Request",
-              "Issue": `#${issueNumber}: ${issueTitle}`,
-              "Requested by": requester,
-              "Action Required": "Manually restore issue to project board, then reopen",
-              "URL": issueUrl
-            };
-
-            const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64');
-            core.setOutput('payload', encodedPayload);
-            core.setOutput('should_notify', 'true');
-
-      - name: Reopen issue
-        id: reopen_success
-        if: steps.check_archived.outputs.is_archived != 'true'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            await github.rest.issues.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              state: 'open'
-            });
-
-            core.info('Issue reopened successfully');
-            core.setOutput('template_key', 'reopen-issue.reopened');
-
-      - name: Report the outcome
-        if: |
-          steps.check_archived.outputs.template_key != '' ||
-          steps.reopen_success.outputs.template_key != ''
+      - name: Confirm the reopen
         uses: ./.github/actions/post-issue-comment
         with:
           issue_number: ${{ github.event.issue.number }}
-          template_key: ${{ steps.check_archived.outputs.template_key || steps.reopen_success.outputs.template_key }}
+          template_key: reopen-issue.reopened
 
-  notify-zoom:
-    needs: reopen-issue
-    if: needs.reopen-issue.outputs.should_notify == 'true'
-    uses: ./.github/workflows/common-notify-zoom.yml
-    with:
-      payload: ${{ needs.reopen-issue.outputs.zoom_payload }}
-    secrets:
-      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
-      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
+      - name: Prepare Zoom notification payload
+        id: prepare_payload
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const boardWarning = process.env.BOARD_WARNING;
+
+            const payload = {
+              "Alert": "Issue reopened",
+              "Issue": `#${context.issue.number}: ${context.payload.issue.title}`,
+              "Reopened by": context.payload.comment.user.login,
+              "URL": context.payload.issue.html_url,
+              // The submitter is told the reopen worked, because it did. A card
+              // left off the board is only ever seen if it is reported here.
+              ...(boardWarning ? { "Board": `⚠️ ${boardWarning}` } : {})
+            };
+
+            // Base64 encode to prevent GitHub from masking the output
+            const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64');
+            core.setOutput('payload', encodedPayload);
+        env:
+          BOARD_WARNING: ${{ steps.reopen.outputs.board_warning }}
 
   resubmit-issue:
     if: |
@@ -202,18 +131,15 @@ jobs:
     timeout-minutes: 5
     permissions:
       issues: write
+      contents: read
+    outputs:
+      zoom_payload: ${{ steps.prepare_payload.outputs.payload }}
     steps:
-      - name: Ensure issue is open for reprocessing
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          script: |
-            await github.rest.issues.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              state: 'open'
-            });
-            core.info('Issue is open for resubmission.');
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
 
       - name: Generate GitHub App token
         id: generate_token
@@ -222,107 +148,60 @@ jobs:
           app-id: ${{ secrets.PROJECT_ACCESS_APP_ID }}
           private-key: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
 
-      - name: Move issue to Concept review column
+      - name: Reopen the issue and return it to concept review
+        id: reopen
+        run: python3 .github/scripts/reopen_issue.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PROJECT_TOKEN: ${{ steps.generate_token.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
+          PROJECT_OWNER: ${{ github.repository_owner }}
+          TARGET_COLUMN: Concept review
+
+      - name: Prepare Zoom notification payload
+        id: prepare_payload
+        if: steps.reopen.outputs.board_warning != ''
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
-          github-token: ${{ steps.generate_token.outputs.token }}
           script: |
-            const PROJECT_NUMBER = 1;
-            const TARGET_COLUMN = 'Concept review';
-            try {
-              // Resolve the project's Status field and the target column's option id.
-              const projectData = await github.graphql(`
-                query($org: String!, $number: Int!) {
-                  organization(login: $org) {
-                    projectV2(number: $number) {
-                      id
-                      field(name: "Status") {
-                        ... on ProjectV2SingleSelectField {
-                          id
-                          options { id name }
-                        }
-                      }
-                    }
-                  }
-                }
-              `, { org: context.repo.owner, number: PROJECT_NUMBER });
+            const payload = {
+              "Alert": "Resubmitted issue is not on the review board",
+              "Issue": `#${context.issue.number}: ${context.payload.issue.title}`,
+              "Board": `⚠️ ${process.env.BOARD_WARNING}`,
+              "Action": "Put the card in Concept review by hand.",
+              "URL": context.payload.issue.html_url
+            };
 
-              const project = projectData.organization.projectV2;
-              const statusField = project.field;
-              const option = statusField.options.find(
-                o => o.name.toLowerCase() === TARGET_COLUMN.toLowerCase()
-              );
-              if (!option) {
-                core.warning(`Column "${TARGET_COLUMN}" not found on project #${PROJECT_NUMBER}.`);
-                return;
-              }
-
-              // Find the existing project item for this issue, if any.
-              const itemData = await github.graphql(`
-                query($issueId: ID!) {
-                  node(id: $issueId) {
-                    ... on Issue {
-                      projectItems(first: 10) {
-                        nodes {
-                          id
-                          isArchived
-                          project { ... on ProjectV2 { number } }
-                        }
-                      }
-                    }
-                  }
-                }
-              `, { issueId: context.payload.issue.node_id });
-
-              let item = itemData.node.projectItems.nodes.find(
-                i => i.project.number === PROJECT_NUMBER
-              );
-
-              if (!item) {
-                // Removed from the board - re-add it (a new item, fields reset).
-                const added = await github.graphql(`
-                  mutation($projectId: ID!, $contentId: ID!) {
-                    addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
-                      item { id }
-                    }
-                  }
-                `, { projectId: project.id, contentId: context.payload.issue.node_id });
-                item = { id: added.addProjectV2ItemById.item.id };
-                core.info('Re-added issue to the project board.');
-              } else if (item.isArchived) {
-                // Archived - unarchive so it shows in the board views again.
-                await github.graphql(`
-                  mutation($projectId: ID!, $itemId: ID!) {
-                    unarchiveProjectV2Item(input: { projectId: $projectId, itemId: $itemId }) {
-                      item { id }
-                    }
-                  }
-                `, { projectId: project.id, itemId: item.id });
-                core.info('Unarchived issue on the project board.');
-              }
-
-              // Set Status -> Concept review (runs last, so it wins over any
-              // built-in "item reopened" board automation).
-              await github.graphql(`
-                mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
-                  updateProjectV2ItemFieldValue(input: {
-                    projectId: $projectId,
-                    itemId: $itemId,
-                    fieldId: $fieldId,
-                    value: { singleSelectOptionId: $optionId }
-                  }) {
-                    projectV2Item { id }
-                  }
-                }
-              `, { projectId: project.id, itemId: item.id, fieldId: statusField.id, optionId: option.id });
-
-              core.info(`Moved issue to "${TARGET_COLUMN}".`);
-            } catch (error) {
-              core.warning(`Unable to move issue to "${TARGET_COLUMN}": ${error.message}`);
-            }
+            // Base64 encode to prevent GitHub from masking the output
+            const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64');
+            core.setOutput('payload', encodedPayload);
+        env:
+          BOARD_WARNING: ${{ steps.reopen.outputs.board_warning }}
 
   resubmit-process:
     needs: [resubmit-issue, resubmit-reopen]
     if: needs.resubmit-issue.outputs.proceed == 'true'
     uses: ./.github/workflows/process-created-issue.yml
-    secrets: inherit
+    secrets:
+      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+      JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      PROJECT_ACCESS_APP_ID: ${{ secrets.PROJECT_ACCESS_APP_ID }}
+      PROJECT_ACCESS_PRIVATE_KEY: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
+      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
+      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
+
+  notify-zoom:
+    needs: [reopen-issue, resubmit-reopen]
+    if: |
+      !cancelled() &&
+      (needs.reopen-issue.outputs.zoom_payload != '' ||
+       needs.resubmit-reopen.outputs.zoom_payload != '')
+    uses: ./.github/workflows/common-notify-zoom.yml
+    with:
+      payload: ${{ needs.reopen-issue.outputs.zoom_payload || needs.resubmit-reopen.outputs.zoom_payload }}
+    secrets:
+      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
+      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
