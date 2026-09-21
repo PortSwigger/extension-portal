@@ -22,6 +22,8 @@ jobs:
     if: github.event.issue.state_reason == 'completed'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      needs_correction: ${{ steps.authority.outputs.needs_correction }}
 
     steps:
       - name: Checkout scripts and actions
@@ -54,3 +56,51 @@ jobs:
         with:
           issue_number: ${{ github.event.issue.number }}
           template_key: close-issue.reason-corrected
+
+  sync-jira-status:
+    needs: guard-close-reason
+    # While the correction is undone GitHub still reads "Completed".
+    if: |
+      !cancelled() &&
+      (github.event.issue.state_reason != 'completed' ||
+       (needs.guard-close-reason.result == 'success' &&
+        needs.guard-close-reason.outputs.needs_correction == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      zoom_payload: ${{ steps.sync.outputs.zoom_payload }}
+
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Park the associated ticket out of the review queue
+        id: sync
+        run: python3 .github/scripts/sync_jira_status.py
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_TYPE_NAME: ${{ github.event.issue.type.name }}
+          ISSUE_ACTION: closed
+          STATE_REASON: not_planned
+          ACTOR_LOGIN: ${{ github.event.sender.login }}
+
+  notify-zoom:
+    needs: sync-jira-status
+    if: |
+      !cancelled() &&
+      needs.sync-jira-status.outputs.zoom_payload != ''
+    uses: ./.github/workflows/common-notify-zoom.yml
+    with:
+      payload: ${{ needs.sync-jira-status.outputs.zoom_payload }}
+    secrets:
+      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
+      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}

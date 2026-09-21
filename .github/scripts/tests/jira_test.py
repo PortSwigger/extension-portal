@@ -21,9 +21,10 @@ import jira
 class RecordingClient(jira.JiraClient):
     """Stands in for Jira at the HTTP boundary only."""
 
-    def __init__(self, responses=None, error_by_operator=None):
+    def __init__(self, responses=None, error_by_operator=None, transitions=None):
         self.responses = responses if responses is not None else []
         self.error_by_operator = error_by_operator or {}
+        self.transitions_offered = transitions if transitions is not None else []
         self.searches = []
         self.sent = []
 
@@ -34,8 +35,10 @@ class RecordingClient(jira.JiraClient):
             raise self.error_by_operator[operator]
         return {'issues': self.responses}
 
-    def _send(self, method, path, payload):
+    def _send(self, method, path, payload=None):
         self.sent.append((method, path, payload))
+        if method == 'GET':
+            return {'transitions': self.transitions_offered}
         return {'key': 'BAPP-1'}
 
 
@@ -124,6 +127,25 @@ class RequestTests(unittest.TestCase):
         self.assertEqual((method, path), ('PUT', '/rest/api/3/issue/BAPP-9'))
         self.assertEqual(payload, {'fields': {'summary': 'x'}})
 
+    def test_a_get_sends_no_body(self):
+        client = jira.JiraClient('https://jira', 'a@b.c', 'token')
+        sent = {}
+
+        def capture(req, timeout=None):
+            sent['data'] = req.data
+            raise RuntimeError('stop here')
+
+        import urllib.request as urllib_request
+        original = urllib_request.urlopen
+        urllib_request.urlopen = capture
+        try:
+            with self.assertRaises(RuntimeError):
+                client._send('GET', '/rest/api/3/issue/BAPP-1/transitions')
+        finally:
+            urllib_request.urlopen = original
+
+        self.assertIsNone(sent['data'])
+
     def test_from_environment_reads_the_credentials(self):
         client = jira.JiraClient.from_environment({
             'JIRA_BASE_URL': 'https://example.atlassian.net/',
@@ -132,6 +154,95 @@ class RequestTests(unittest.TestCase):
         })
         self.assertEqual(client._base_url, 'https://example.atlassian.net')
         self.assertTrue(client._headers['Authorization'].startswith('Basic '))
+
+
+class AllowedFieldsTests(unittest.TestCase):
+    def test_only_what_the_transition_screens_for_survives(self):
+        transition = {'fields': {'resolution': {}}}
+        self.assertEqual(
+            jira.allowed_fields({'resolution': {'id': '1'}, 'summary': 'x'},
+                                transition),
+            {'resolution': {'id': '1'}})
+
+    def test_a_transition_with_no_screen_takes_nothing(self):
+        self.assertEqual(
+            jira.allowed_fields({'resolution': {'id': '1'}}, {'fields': {}}), {})
+
+    def test_missing_field_metadata_is_treated_as_no_screen(self):
+        self.assertEqual(jira.allowed_fields({'resolution': {'id': '1'}}, {}), {})
+
+    def test_asking_for_nothing_is_tolerated(self):
+        self.assertEqual(jira.allowed_fields(None, {'fields': {'resolution': {}}}), {})
+
+
+class TransitionTests(unittest.TestCase):
+    CLOSE_UNSCREENED = {'id': '7', 'to': {'id': jira.REJECTED_STATUS},
+                                 'fields': {}}
+    CLOSE_SCREENED = {'id': '171', 'to': {'id': jira.REJECTED_STATUS},
+                           'fields': {'resolution': {'required': True}}}
+    DIRECT_APPROVAL = {'id': '151', 'to': {'id': jira.APPROVED_STATUS}, 'fields': {}}
+
+    def test_transitions_are_read_from_the_ticket(self):
+        client = RecordingClient(transitions=[self.DIRECT_APPROVAL])
+        self.assertEqual(client.transitions('BAPP-9'), [self.DIRECT_APPROVAL])
+        method, path, _ = client.sent[0]
+        self.assertEqual(method, 'GET')
+        self.assertTrue(path.startswith('/rest/api/3/issue/BAPP-9/transitions'))
+
+    def test_a_ticket_offering_no_transitions_reads_as_empty(self):
+        client = RecordingClient(transitions=None)
+        self.assertEqual(client.transitions('BAPP-9'), [])
+
+    def test_the_move_to_the_target_status_is_the_one_posted(self):
+        client = RecordingClient(
+            transitions=[self.DIRECT_APPROVAL, self.CLOSE_UNSCREENED])
+        client.transition_to_status('BAPP-9', jira.REJECTED_STATUS)
+
+        method, path, payload = client.sent[-1]
+        self.assertEqual((method, path),
+                         ('POST', '/rest/api/3/issue/BAPP-9/transitions'))
+        self.assertEqual(payload, {'transition': {'id': '7'}})
+
+    def test_a_field_the_transition_screens_for_is_carried_onto_it(self):
+        client = RecordingClient(transitions=[self.CLOSE_SCREENED])
+        client.transition_to_status('BAPP-9', jira.REJECTED_STATUS,
+                                    {'resolution': {'id': jira.DECLINED_RESOLUTION}})
+
+        _, _, payload = client.sent[-1]
+        self.assertEqual(payload['fields'],
+                         {'resolution': {'id': jira.DECLINED_RESOLUTION}})
+
+    def test_a_field_the_transition_has_no_screen_for_is_dropped(self):
+        client = RecordingClient(transitions=[self.CLOSE_UNSCREENED])
+        client.transition_to_status('BAPP-9', jira.REJECTED_STATUS,
+                                    {'resolution': {'id': jira.DECLINED_RESOLUTION}})
+
+        _, _, payload = client.sent[-1]
+        self.assertNotIn('fields', payload)
+
+    def test_the_fields_expansion_is_asked_for(self):
+        client = RecordingClient(transitions=[self.CLOSE_SCREENED])
+        client.transitions('BAPP-9')
+        self.assertIn('expand=transitions.fields', client.sent[0][1])
+
+    def test_empty_fields_are_left_off_the_payload(self):
+        client = RecordingClient(transitions=[self.CLOSE_SCREENED])
+        client.transition_to_status('BAPP-9', jira.REJECTED_STATUS, {})
+
+        _, _, payload = client.sent[-1]
+        self.assertNotIn('fields', payload)
+
+    def test_an_unreachable_status_raises_rather_than_guessing(self):
+        client = RecordingClient(transitions=[self.DIRECT_APPROVAL])
+        with self.assertRaises(jira.TransitionUnavailable):
+            client.transition_to_status('BAPP-9', jira.REJECTED_STATUS)
+
+        self.assertEqual([method for method, _, _ in client.sent], ['GET'])
+
+    def test_a_transition_with_no_destination_is_ignored(self):
+        client = RecordingClient(transitions=[{'id': '3', 'name': 'Odd'}])
+        with self.assertRaises(jira.TransitionUnavailable):
+            client.transition_to_status('BAPP-9', jira.REJECTED_STATUS)
 
 
 if __name__ == '__main__':

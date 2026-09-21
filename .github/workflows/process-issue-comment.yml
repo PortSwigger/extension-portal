@@ -24,9 +24,10 @@ jobs:
       github.event.issue.state == 'closed' &&
       startsWith(github.event.comment.body, '/reopen')
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       zoom_payload: ${{ steps.prepare_payload.outputs.payload }}
+      jira_zoom_payload: ${{ steps.sync.outputs.zoom_payload }}
 
     steps:
       - name: Checkout scripts and actions
@@ -60,6 +61,21 @@ jobs:
         with:
           issue_number: ${{ github.event.issue.number }}
           template_key: reopen-issue.reopened
+
+      - name: Return the associated ticket to the review queue
+        id: sync
+        continue-on-error: true
+        if: '!cancelled() && steps.reopen.outcome == ''success'''
+        run: python3 .github/scripts/sync_jira_status.py
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_TYPE_NAME: ${{ github.event.issue.type.name }}
+          ISSUE_ACTION: reopened
+          ACTOR_LOGIN: ${{ github.event.comment.user.login }}
 
       - name: Prepare Zoom notification payload
         id: prepare_payload
@@ -202,6 +218,18 @@ jobs:
     uses: ./.github/workflows/common-notify-zoom.yml
     with:
       payload: ${{ needs.reopen-issue.outputs.zoom_payload || needs.resubmit-reopen.outputs.zoom_payload }}
+    secrets:
+      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
+      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
+
+  notify-zoom-jira:
+    needs: reopen-issue
+    if: |
+      !cancelled() &&
+      needs.reopen-issue.outputs.jira_zoom_payload != ''
+    uses: ./.github/workflows/common-notify-zoom.yml
+    with:
+      payload: ${{ needs.reopen-issue.outputs.jira_zoom_payload }}
     secrets:
       ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
       ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}

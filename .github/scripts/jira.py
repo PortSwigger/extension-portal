@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
 
-"""
-Jira access for the BApp Store submission pipelines.
-
-Every ticket the pipelines touch lives in the BAPP project and carries two
-custom fields: the "bapp url" of the artifact under review, and the URL of the
-GitHub issue it came from. Tickets are found by one of those URLs, which Jira
-matches loosely, so find_by_url_field re-checks the results properly.
-"""
+"""Jira access for the BApp Store submission pipelines."""
 
 import base64
 import json
@@ -24,6 +17,15 @@ UPDATE_SUBTASK_ISSUE_TYPE = '10279'
 BAPP_URL_FIELD = 'customfield_10932'
 GITHUB_ISSUE_FIELD = 'customfield_13486'
 
+REJECTED_STATUS = '10103'
+FEEDBACK_STATUS = '11030'
+APPROVED_STATUS = '11006'
+DECLINED_RESOLUTION = '10200'
+
+
+class TransitionUnavailable(RuntimeError):
+    pass
+
 
 def jql_field(field):
     return f"cf[{field.removeprefix('customfield_')}]"
@@ -31,6 +33,13 @@ def jql_field(field):
 
 def escape_jql(value):
     return (value or '').replace('\\', '\\\\').replace('"', '\\"')
+
+
+def allowed_fields(fields, transition):
+    # Jira rejects a field that is not on the transition's own screen.
+    offered = transition.get('fields') or {}
+    return {name: value for name, value in (fields or {}).items()
+            if name in offered}
 
 
 class JiraClient:
@@ -50,9 +59,10 @@ class JiraClient:
                    env.get('JIRA_USER_EMAIL'),
                    env.get('JIRA_API_TOKEN'))
 
-    def _send(self, method, path, payload):
-        req = request.Request(f'{self._base_url}{path}', method=method,
-                              data=json.dumps(payload).encode())
+    def _send(self, method, path, payload=None):
+        req = request.Request(
+            f'{self._base_url}{path}', method=method,
+            data=None if payload is None else json.dumps(payload).encode())
         for name, value in self._headers.items():
             req.add_header(name, value)
         with request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as response:
@@ -67,9 +77,8 @@ class JiraClient:
         """
         Tickets of this type whose `field` holds this URL.
 
-        Jira matches URL fields loosely, so the search asks for "contains" - falling
-        back to exact match if the field rejects that - and the results are then
-        compared properly.
+        Jira matches URL fields loosely, so the search asks for "contains" -
+        falling back to exact match if rejected - and re-checks the results.
         """
         def jql(operator):
             return (f'project = {PROJECT} AND issuetype = {issue_type} '
@@ -90,3 +99,23 @@ class JiraClient:
 
     def update_issue(self, key, fields):
         self._send('PUT', f'/rest/api/3/issue/{key}', {'fields': fields})
+
+    def transitions(self, key):
+        return self._send(
+            'GET',
+            f'/rest/api/3/issue/{key}/transitions?expand=transitions.fields',
+        ).get('transitions') or []
+
+    def transition_to_status(self, key, status_id, fields=None):
+        for transition in self.transitions(key):
+            if (transition.get('to') or {}).get('id') != status_id:
+                continue
+            payload = {'transition': {'id': transition['id']}}
+            accepted = allowed_fields(fields, transition)
+            if accepted:
+                payload['fields'] = accepted
+            self._send('POST', f'/rest/api/3/issue/{key}/transitions', payload)
+            return
+
+        raise TransitionUnavailable(
+            f'{key} offers no transition to status {status_id}.')

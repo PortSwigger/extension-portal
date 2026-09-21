@@ -1,0 +1,55 @@
+name: Process reopened issue
+
+# Only reopens made by a person reach here: /reopen and /resubmit reopen with
+# GITHUB_TOKEN, which raises no workflow run, so they move the ticket themselves
+# in process-issue-comment.yml.
+
+on:
+  issues:
+    types: [reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-issue-${{ github.event.issue.user.login }}
+  cancel-in-progress: false
+
+jobs:
+  sync-jira-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      zoom_payload: ${{ steps.sync.outputs.zoom_payload }}
+
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Return the associated ticket to the review queue
+        id: sync
+        run: python3 .github/scripts/sync_jira_status.py
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_TYPE_NAME: ${{ github.event.issue.type.name }}
+          ISSUE_ACTION: reopened
+          ACTOR_LOGIN: ${{ github.event.sender.login }}
+
+  notify-zoom:
+    needs: sync-jira-status
+    if: |
+      !cancelled() &&
+      needs.sync-jira-status.outputs.zoom_payload != ''
+    uses: ./.github/workflows/common-notify-zoom.yml
+    with:
+      payload: ${{ needs.sync-jira-status.outputs.zoom_payload }}
+    secrets:
+      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
+      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
