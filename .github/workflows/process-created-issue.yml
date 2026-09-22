@@ -243,26 +243,21 @@ jobs:
 
     steps:
       - name: Apply product compatibility labels
-        if: needs.extract-issue-details.outputs.product_compatibility != ''
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             try {
-              const compatibilityData = process.env.PRODUCT_COMPATIBILITY || '[]';
-              const labels = JSON.parse(compatibilityData);
+              const selected = JSON.parse(process.env.PRODUCT_COMPATIBILITY || '[]');
+              const labels = ['Professional', ...(Array.isArray(selected) ? selected : [])];
 
-              if (Array.isArray(labels) && labels.length > 0) {
-                await github.rest.issues.addLabels({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  labels: labels
-                });
-                core.info(`Applied product compatibility labels: ${labels.join(', ')}`);
-              } else {
-                core.info('No additional product compatibility labels selected');
-              }
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: labels
+              });
+              core.info(`Applied product compatibility labels: ${labels.join(', ')}`);
             } catch (error) {
               core.warning(`Failed to apply product compatibility labels: ${error.message}`);
             }
