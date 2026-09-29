@@ -104,13 +104,47 @@ jobs:
         with:
           issue_number: ${{ github.event.issue.number }}
 
-  validate-submission:
+  find-prior-ticket:
     needs: extract-issue-details
     if: |
       !cancelled() &&
       (needs.extract-issue-details.outputs.type == 'extension-submission' ||
        needs.extract-issue-details.outputs.type == 'extension-update') &&
       needs.extract-issue-details.outputs.error_message == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      original_issue_url: ${{ steps.find.outputs.original_issue_url }}
+      jira_key: ${{ steps.find.outputs.jira_key }}
+
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Find the ticket that already covers this submission
+        id: find
+        run: python3 .github/scripts/find_prior_ticket.py
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          TYPE: ${{ needs.extract-issue-details.outputs.type }}
+          URL: ${{ needs.extract-issue-details.outputs.url }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+
+  validate-submission:
+    needs: [extract-issue-details, find-prior-ticket]
+    if: |
+      !cancelled() &&
+      (needs.extract-issue-details.outputs.type == 'extension-submission' ||
+       needs.extract-issue-details.outputs.type == 'extension-update') &&
+      needs.extract-issue-details.outputs.error_message == '' &&
+      needs.find-prior-ticket.outputs.original_issue_url == ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -232,7 +266,7 @@ jobs:
           RESOLVE_URL: ${{ steps.resolve_source.outputs.normalized_url }}
 
   submit-extension:
-    needs: [extract-issue-details, validate-submission]
+    needs: [extract-issue-details, validate-submission, find-prior-ticket]
     if: |
       !cancelled() &&
       needs.extract-issue-details.outputs.type == 'extension-submission'
@@ -243,6 +277,7 @@ jobs:
 
     steps:
       - name: Apply product compatibility labels
+        if: needs.find-prior-ticket.outputs.original_issue_url == ''
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -276,7 +311,9 @@ jobs:
         id: create_jira
         if: |
           needs.extract-issue-details.outputs.error_message == '' &&
-          needs.validate-submission.outputs.error_message == ''
+          needs.validate-submission.outputs.error_message == '' &&
+          needs.find-prior-ticket.outputs.original_issue_url == '' &&
+          needs.find-prior-ticket.outputs.jira_key == ''
         run: python3 .github/scripts/create_submission_ticket.py
         env:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
@@ -336,16 +373,27 @@ jobs:
           script: |
             const extractError = process.env.EXTRACT_ERROR || '';
             const validateError = process.env.VALIDATE_ERROR || '';
+            const originalIssueUrl = process.env.ORIGINAL_ISSUE_URL || '';
+            const priorTicket = process.env.PRIOR_TICKET || '';
             const createJiraOutcome = process.env.CREATE_JIRA_OUTCOME || 'skipped';
 
-            const jobSuccess = !extractError && !validateError && createJiraOutcome === 'success';
+            if (originalIssueUrl) {
+              core.setOutput('template_key', 'extension-submission.duplicate');
+              core.setOutput('should_close', 'true');
+              return;
+            }
+
+            const ticketed = priorTicket || createJiraOutcome === 'success';
+            const jobSuccess = !extractError && !validateError && ticketed;
 
             let templateKey;
             let errorMessage = '';
             let shouldClose = false;
 
             if (jobSuccess) {
-              templateKey = 'extension-submission.success';
+              templateKey = priorTicket
+                ? 'extension-submission.manual'
+                : 'extension-submission.success';
             } else {
               const specificError = extractError || validateError || (createJiraOutcome === 'failure'
                 ? 'Failed to create ticket. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance.'
@@ -363,6 +411,8 @@ jobs:
         env:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
           VALIDATE_ERROR: ${{ needs.validate-submission.outputs.error_message }}
+          ORIGINAL_ISSUE_URL: ${{ needs.find-prior-ticket.outputs.original_issue_url }}
+          PRIOR_TICKET: ${{ needs.find-prior-ticket.outputs.jira_key }}
           CREATE_JIRA_OUTCOME: ${{ steps.create_jira.outcome }}
 
       - name: Prepare Zoom notification payload
@@ -374,15 +424,24 @@ jobs:
             const title = process.env.TITLE;
             const jiraKey = process.env.JIRA_KEY;
             const validateError = process.env.VALIDATE_ERROR;
+            const originalIssueUrl = process.env.ORIGINAL_ISSUE_URL;
+            const priorTicket = process.env.PRIOR_TICKET;
             const issueUrl = context.payload.issue.html_url;
 
             const payload = {
               "Extension": title,
-              "Issue": issueUrl,
-              ...(validateError
-                ? { "Validation Error": `❌ ${validateError}` }
-                : { "Jira Ticket": jiraKey || '❌ Not created' })
+              "Issue": issueUrl
             };
+
+            if (originalIssueUrl) {
+              payload["Duplicate of"] = originalIssueUrl;
+            } else if (validateError) {
+              payload["Validation Error"] = `❌ ${validateError}`;
+            } else if (priorTicket) {
+              payload["Action"] = `⚠️ ${priorTicket} already covers this extension - link it to this issue by hand.`;
+            } else {
+              payload["Jira Ticket"] = jiraKey || '❌ Not created';
+            }
 
             // Base64 encode to prevent GitHub from masking the output
             const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64');
@@ -391,6 +450,8 @@ jobs:
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
           JIRA_KEY: ${{ steps.create_jira.outputs.jira_key }}
           VALIDATE_ERROR: ${{ needs.validate-submission.outputs.error_message }}
+          ORIGINAL_ISSUE_URL: ${{ needs.find-prior-ticket.outputs.original_issue_url }}
+          PRIOR_TICKET: ${{ needs.find-prior-ticket.outputs.jira_key }}
 
       - name: Post outcome comment
         id: post_comment
@@ -402,6 +463,7 @@ jobs:
           issue_number: ${{ github.event.issue.number }}
           template_key: ${{ steps.prepare_comment.outputs.template_key }}
           error_message: ${{ steps.prepare_comment.outputs.error_message }}
+          original_issue_url: ${{ needs.find-prior-ticket.outputs.original_issue_url }}
 
       - name: Close issue
         if: |
@@ -411,9 +473,10 @@ jobs:
         uses: ./.github/actions/close-issue
         with:
           issue_number: ${{ github.event.issue.number }}
+          duplicate_of: ${{ needs.find-prior-ticket.outputs.original_issue_url }}
 
   submit-update:
-    needs: [extract-issue-details, validate-submission]
+    needs: [extract-issue-details, validate-submission, find-prior-ticket]
     if: |
       !cancelled() &&
       needs.extract-issue-details.outputs.type == 'extension-update'
@@ -435,7 +498,9 @@ jobs:
         id: create_jira
         if: |
           needs.extract-issue-details.outputs.error_message == '' &&
-          needs.validate-submission.outputs.error_message == ''
+          needs.validate-submission.outputs.error_message == '' &&
+          needs.find-prior-ticket.outputs.original_issue_url == '' &&
+          needs.find-prior-ticket.outputs.jira_key == ''
         run: python3 .github/scripts/create_update_ticket.py
         env:
           JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
@@ -475,6 +540,8 @@ jobs:
             const jiraKey = process.env.JIRA_KEY;
             const reason = process.env.UPDATE_REASON;
             const reviewOutcome = process.env.REVIEW_OUTCOME;
+            const originalIssueUrl = process.env.ORIGINAL_ISSUE_URL;
+            const priorTicket = process.env.PRIOR_TICKET;
 
             const payload = {
               "Extension": title,
@@ -483,9 +550,13 @@ jobs:
               "Issue": issueUrl
             };
 
-            if (validateError) {
+            if (originalIssueUrl) {
+              payload["Duplicate of"] = originalIssueUrl;
+            } else if (validateError) {
               // Repository link validation failed - the submission is rejected.
               payload["Validation Error"] = `❌ ${validateError}`;
+            } else if (priorTicket) {
+              payload["Action"] = `⚠️ ${priorTicket} already covers this update - link it to this issue by hand.`;
             } else if (status === 'automated') {
               // Subtask created and review kicked off automatically.
               payload["Update Ticket"] = jiraKey;
@@ -510,6 +581,8 @@ jobs:
           JIRA_KEY: ${{ steps.create_jira.outputs.jira_key }}
           UPDATE_REASON: ${{ steps.create_jira.outputs.reason }}
           REVIEW_OUTCOME: ${{ steps.review_workflow.outcome }}
+          ORIGINAL_ISSUE_URL: ${{ needs.find-prior-ticket.outputs.original_issue_url }}
+          PRIOR_TICKET: ${{ needs.find-prior-ticket.outputs.jira_key }}
 
       - name: Prepare comment data
         id: prepare_comment
@@ -520,6 +593,13 @@ jobs:
             const extractError = process.env.EXTRACT_ERROR || '';
             const validateError = process.env.VALIDATE_ERROR || '';
             const status = process.env.UPDATE_STATUS || '';
+            const originalIssueUrl = process.env.ORIGINAL_ISSUE_URL || '';
+
+            if (originalIssueUrl) {
+              core.setOutput('template_key', 'update-submission.duplicate');
+              core.setOutput('should_close', 'true');
+              return;
+            }
 
             // A matched-or-manual update is a success for the submitter; only a bad
             // submission (extraction or repository link validation) is rejected.
@@ -553,6 +633,7 @@ jobs:
           EXTRACT_ERROR: ${{ needs.extract-issue-details.outputs.error_message }}
           VALIDATE_ERROR: ${{ needs.validate-submission.outputs.error_message }}
           UPDATE_STATUS: ${{ steps.create_jira.outputs.status }}
+          ORIGINAL_ISSUE_URL: ${{ needs.find-prior-ticket.outputs.original_issue_url }}
 
       - name: Post outcome comment
         id: post_comment
@@ -564,6 +645,7 @@ jobs:
           issue_number: ${{ github.event.issue.number }}
           template_key: ${{ steps.prepare_comment.outputs.template_key }}
           error_message: ${{ steps.prepare_comment.outputs.error_message }}
+          original_issue_url: ${{ needs.find-prior-ticket.outputs.original_issue_url }}
 
       - name: Close issue
         if: |
@@ -573,6 +655,7 @@ jobs:
         uses: ./.github/actions/close-issue
         with:
           issue_number: ${{ github.event.issue.number }}
+          duplicate_of: ${{ needs.find-prior-ticket.outputs.original_issue_url }}
 
   notify-zoom:
     needs: [extract-issue-details, submit-extension, submit-update]

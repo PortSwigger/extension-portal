@@ -39,6 +39,22 @@ both forms.
 Submissions are parsed literally, so an issue that reads correctly to a human
 but does not match that format is closed with an explanation of what to fix.
 
+## Duplicate submissions
+
+Each extension is tracked by a single issue. A second issue for an extension we
+already have is closed as a duplicate, with a link to the original — so if your
+submission was closed after a failed check, comment `/resubmit` (or `/reopen`
+for an update) on it rather than opening another. The same applies to an update
+whose pull request is already on the portal.
+
+A duplicate cannot be reopened or resubmitted — `/reopen` and `/resubmit` on one
+reply with a pointer to the original rather than putting a second copy of the
+same extension back in the queue.
+
+An extension we were reviewing before it reached the portal has no issue yet.
+Submitting one of those is accepted, and our team links it to the review we
+already have rather than a second one being started.
+
 ## Tracking your submission
 
 All submissions are tracked in our [Extension submissions](https://github.com/orgs/PortSwigger/projects/1) GitHub project, where you can monitor the status of your submission through the review process.

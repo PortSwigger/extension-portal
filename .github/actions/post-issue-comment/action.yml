@@ -14,6 +14,10 @@ inputs:
     description: Error message for template substitution.
     required: false
     default: ''
+  original_issue_url:
+    description: The issue this one duplicates, for template substitution.
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -59,3 +63,4 @@ runs:
         ISSUE_NUMBER: ${{ inputs.issue_number }}
         TEMPLATE_KEY: ${{ inputs.template_key }}
         ERROR_MESSAGE: ${{ inputs.error_message }}
+        ORIGINAL_ISSUE_URL: ${{ inputs.original_issue_url }}

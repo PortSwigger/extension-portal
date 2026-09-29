@@ -24,6 +24,24 @@
       "❌ Submission failed.",
       "",
       "Your submission could not be processed. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance."
+    ],
+    "duplicate": [
+      "ℹ️ This extension has already been submitted.",
+      "",
+      "We're tracking it at {{ORIGINAL_ISSUE_URL}}, so this issue has been closed as a duplicate.",
+      "",
+      "Please follow that issue for updates. If it is closed and you have since made changes, comment `/resubmit` there rather than opening another issue.",
+      "",
+      "If you believe this is a different extension, contact [bapps@portswigger.net](mailto:bapps@portswigger.net)."
+    ],
+    "manual": [
+      "Thank you for your BApp Store extension submission!",
+      "",
+      "We already had a review ticket for this extension, so your submission has been received and our team has been notified. We'll link the two up and begin the review shortly.",
+      "",
+      "You can track the progress in our [Extension submissions](https://github.com/orgs/PortSwigger/projects/1) project.",
+      "",
+      "If you have any questions, please comment on this issue. For urgent matters, contact [bapps@portswigger.net](mailto:bapps@portswigger.net)."
     ]
   },
   "update-submission": {
@@ -60,6 +78,15 @@
       "❌ Update submission failed.",
       "",
       "Your update could not be processed. Please contact [bapps@portswigger.net](mailto:bapps@portswigger.net) for assistance."
+    ],
+    "duplicate": [
+      "ℹ️ This update has already been submitted.",
+      "",
+      "We're tracking the same pull request at {{ORIGINAL_ISSUE_URL}}, so this issue has been closed as a duplicate.",
+      "",
+      "Please follow that issue for updates. If it is closed and you have since made changes, comment `/reopen` there rather than opening another issue.",
+      "",
+      "If you believe this is a different update, contact [bapps@portswigger.net](mailto:bapps@portswigger.net)."
     ]
   },
   "resubmit": {
@@ -105,6 +132,15 @@
       "Please open a new issue using the [New extension submission](https://github.com/PortSwigger/extension-portal/issues/new?template=01-submit-extension.yml) or [Update for existing extension](https://github.com/PortSwigger/extension-portal/issues/new?template=02-submit-update.yml) form. If you're submitting programmatically, [AGENTS.md](https://github.com/PortSwigger/extension-portal/blob/main/AGENTS.md) has the exact issue body to send.",
       "",
       "If you meant to ask us something rather than submit an extension, contact [bapps@portswigger.net](mailto:bapps@portswigger.net)."
+    ]
+  },
+  "duplicate-issue": {
+    "not-reopened": [
+      "ℹ️ This issue was closed as a duplicate, so it can't be reopened or resubmitted.",
+      "",
+      "Our earlier comment links the issue we're tracking this extension on — please follow that one instead, and comment there if you have changes for us to look at.",
+      "",
+      "If you believe this was closed in error, contact [bapps@portswigger.net](mailto:bapps@portswigger.net)."
     ]
   }
 }

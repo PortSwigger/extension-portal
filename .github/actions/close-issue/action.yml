@@ -12,11 +12,18 @@ inputs:
     description: 'Why the issue is being closed: not_planned or completed.'
     required: false
     default: not_planned
+  duplicate_of:
+    description: >-
+      URL of the issue this one duplicates. Closes it against that issue
+      instead, which supersedes state_reason.
+    required: false
+    default: ''
 
 runs:
   using: composite
   steps:
     - name: Close issue
+      if: inputs.duplicate_of == ''
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       with:
         script: |
@@ -31,3 +38,31 @@ runs:
       env:
         ISSUE_NUMBER: ${{ inputs.issue_number }}
         STATE_REASON: ${{ inputs.state_reason }}
+
+    - name: Close issue as a duplicate
+      if: inputs.duplicate_of != ''
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      with:
+        script: |
+          const { repository, resource } = await github.graphql(`
+            query($owner: String!, $repo: String!, $number: Int!, $url: URI!) {
+              repository(owner: $owner, name: $repo) { issue(number: $number) { id } }
+              resource(url: $url) { ... on Issue { id } }
+            }`, { ...context.repo,
+                  number: parseInt(process.env.ISSUE_NUMBER),
+                  url: process.env.DUPLICATE_OF });
+
+          await github.graphql(`
+            mutation($issueId: ID!, $duplicateIssueId: ID) {
+              closeIssue(input: {
+                issueId: $issueId,
+                stateReason: DUPLICATE,
+                duplicateIssueId: $duplicateIssueId
+              }) { issue { number } }
+            }`, { issueId: repository.issue.id,
+                  duplicateIssueId: resource?.id ?? null });
+
+          core.info(`Closed issue #${process.env.ISSUE_NUMBER} as a duplicate of ${process.env.DUPLICATE_OF}.`);
+      env:
+        ISSUE_NUMBER: ${{ inputs.issue_number }}
+        DUPLICATE_OF: ${{ inputs.duplicate_of }}

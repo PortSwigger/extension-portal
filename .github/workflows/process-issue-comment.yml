@@ -4,6 +4,10 @@ name: Process issue comment commands
 #   /reopen   - reopens a closed issue (restoring archived ones via the team).
 #   /resubmit - re-runs the automated submission pipeline after a repo-specific
 #               rejection, unless a submission already succeeded.
+#
+# Neither applies to an issue closed as a duplicate: the submission it duplicates
+# is the one to follow, and reopening this one would put a second copy of the
+# same extension back on the review board.
 
 on:
   issue_comment:
@@ -18,10 +22,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  refuse-duplicate:
+    if: |
+      github.event.issue.pull_request == null &&
+      github.event.issue.state_reason == 'duplicate' &&
+      (startsWith(github.event.comment.body, '/reopen') ||
+       startsWith(github.event.comment.body, '/resubmit'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout actions
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/actions
+          sparse-checkout-cone-mode: false
+
+      - name: Explain that a duplicate is not reopened
+        uses: ./.github/actions/post-issue-comment
+        with:
+          issue_number: ${{ github.event.issue.number }}
+          template_key: duplicate-issue.not-reopened
+
   reopen-issue:
     if: |
       github.event.issue.pull_request == null &&
       github.event.issue.state == 'closed' &&
+      github.event.issue.state_reason != 'duplicate' &&
       startsWith(github.event.comment.body, '/reopen')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -103,6 +130,7 @@ jobs:
   resubmit-issue:
     if: |
       github.event.issue.pull_request == null &&
+      github.event.issue.state_reason != 'duplicate' &&
       startsWith(github.event.comment.body, '/resubmit')
     runs-on: ubuntu-latest
     timeout-minutes: 5

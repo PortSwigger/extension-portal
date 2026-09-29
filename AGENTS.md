@@ -178,6 +178,11 @@ The pipeline comments on the issue within a few minutes:
   problem, then comment `/resubmit` on the closed issue to run the checks again.
   For updates, comment `/reopen`.
 
+- **Duplicate** — the extension, or for an update the pull request, is already
+  tracked by another issue. The comment links to it and this issue is closed as
+  a duplicate, whether that one is open or closed. `/resubmit` and `/reopen` do
+  not apply to it; use the issue it duplicates.
+
 Do not open a second issue for the same extension after a failure. Resubmit on
 the existing one.
 
