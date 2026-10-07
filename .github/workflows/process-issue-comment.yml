@@ -53,8 +53,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      zoom_payload: ${{ steps.prepare_payload.outputs.payload }}
-      jira_zoom_payload: ${{ steps.sync.outputs.zoom_payload }}
+      notification: ${{ steps.prepare_notification.outputs.notification }}
+      jira_notification: ${{ steps.sync.outputs.notification }}
 
     steps:
       - name: Checkout scripts and actions
@@ -104,27 +104,16 @@ jobs:
           ISSUE_ACTION: reopened
           ACTOR_LOGIN: ${{ github.event.comment.user.login }}
 
-      - name: Prepare Zoom notification payload
-        id: prepare_payload
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const boardWarning = process.env.BOARD_WARNING;
-
-            const payload = {
-              "Alert": "Issue reopened",
-              "Issue": `#${context.issue.number}: ${context.payload.issue.title}`,
-              "Reopened by": context.payload.comment.user.login,
-              "URL": context.payload.issue.html_url,
-              // The submitter is told the reopen worked, because it did. A card
-              // left off the board is only ever seen if it is reported here.
-              ...(boardWarning ? { "Board": `⚠️ ${boardWarning}` } : {})
-            };
-
-            // Base64 encode to prevent GitHub from masking the output
-            const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64');
-            core.setOutput('payload', encodedPayload);
+      - name: Prepare the notification
+        id: prepare_notification
+        continue-on-error: true
+        run: python3 .github/scripts/report_reopen.py
         env:
+          COMMAND: reopen
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_TYPE_NAME: ${{ github.event.issue.type.name }}
+          ACTOR_LOGIN: ${{ github.event.comment.user.login }}
           BOARD_WARNING: ${{ steps.reopen.outputs.board_warning }}
 
   resubmit-issue:
@@ -177,7 +166,7 @@ jobs:
       issues: write
       contents: read
     outputs:
-      zoom_payload: ${{ steps.prepare_payload.outputs.payload }}
+      notification: ${{ steps.prepare_notification.outputs.notification }}
     steps:
       - name: Checkout scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -204,24 +193,15 @@ jobs:
           PROJECT_OWNER: ${{ github.repository_owner }}
           TARGET_COLUMN: Concept review
 
-      - name: Prepare Zoom notification payload
-        id: prepare_payload
-        if: steps.reopen.outputs.board_warning != ''
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const payload = {
-              "Alert": "Resubmitted issue is not on the review board",
-              "Issue": `#${context.issue.number}: ${context.payload.issue.title}`,
-              "Board": `⚠️ ${process.env.BOARD_WARNING}`,
-              "Action": "Put the card in Concept review by hand.",
-              "URL": context.payload.issue.html_url
-            };
-
-            // Base64 encode to prevent GitHub from masking the output
-            const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64');
-            core.setOutput('payload', encodedPayload);
+      - name: Prepare the notification
+        id: prepare_notification
+        continue-on-error: true
+        run: python3 .github/scripts/report_reopen.py
         env:
+          COMMAND: resubmit
+          ISSUE_URL: ${{ github.event.issue.html_url }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_TYPE_NAME: ${{ github.event.issue.type.name }}
           BOARD_WARNING: ${{ steps.reopen.outputs.board_warning }}
 
   resubmit-process:
@@ -234,30 +214,29 @@ jobs:
       JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
       PROJECT_ACCESS_APP_ID: ${{ secrets.PROJECT_ACCESS_APP_ID }}
       PROJECT_ACCESS_PRIVATE_KEY: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
-      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
-      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
+      WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
 
-  notify-zoom:
+  notify-webhook:
     needs: [reopen-issue, resubmit-reopen]
     if: |
       !cancelled() &&
-      (needs.reopen-issue.outputs.zoom_payload != '' ||
-       needs.resubmit-reopen.outputs.zoom_payload != '')
-    uses: ./.github/workflows/common-notify-zoom.yml
+      (needs.reopen-issue.outputs.notification != '' ||
+       needs.resubmit-reopen.outputs.notification != '')
+    uses: ./.github/workflows/common-notify-webhook.yml
     with:
-      payload: ${{ needs.reopen-issue.outputs.zoom_payload || needs.resubmit-reopen.outputs.zoom_payload }}
+      payload: ${{ needs.reopen-issue.outputs.notification || needs.resubmit-reopen.outputs.notification }}
     secrets:
-      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
-      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
+      WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
 
-  notify-zoom-jira:
+  notify-webhook-jira:
     needs: reopen-issue
     if: |
       !cancelled() &&
-      needs.reopen-issue.outputs.jira_zoom_payload != ''
-    uses: ./.github/workflows/common-notify-zoom.yml
+      needs.reopen-issue.outputs.jira_notification != ''
+    uses: ./.github/workflows/common-notify-webhook.yml
     with:
-      payload: ${{ needs.reopen-issue.outputs.jira_zoom_payload }}
+      payload: ${{ needs.reopen-issue.outputs.jira_notification }}
     secrets:
-      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
-      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
+      WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}

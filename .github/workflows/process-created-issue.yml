@@ -15,9 +15,7 @@ on:
         required: true
       PROJECT_ACCESS_PRIVATE_KEY:
         required: true
-      ZOOM_WEBHOOK_URL:
-        required: true
-      ZOOM_VERIFICATION_TOKEN:
+      WEBHOOK_URL:
         required: true
 
 permissions:
@@ -273,7 +271,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      zoom_payload: ${{ steps.prepare_zoom.outputs.payload }}
+      notification: ${{ steps.prepare_notification.outputs.notification }}
 
     steps:
       - name: Apply product compatibility labels
@@ -415,41 +413,23 @@ jobs:
           PRIOR_TICKET: ${{ needs.find-prior-ticket.outputs.jira_key }}
           CREATE_JIRA_OUTCOME: ${{ steps.create_jira.outcome }}
 
-      - name: Prepare Zoom notification payload
-        id: prepare_zoom
+      - name: Prepare the notification
+        id: prepare_notification
+        continue-on-error: true
         if: needs.extract-issue-details.outputs.error_message == ''
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const title = process.env.TITLE;
-            const jiraKey = process.env.JIRA_KEY;
-            const validateError = process.env.VALIDATE_ERROR;
-            const originalIssueUrl = process.env.ORIGINAL_ISSUE_URL;
-            const priorTicket = process.env.PRIOR_TICKET;
-            const issueUrl = context.payload.issue.html_url;
-
-            const payload = {
-              "Extension": title,
-              "Issue": issueUrl
-            };
-
-            if (originalIssueUrl) {
-              payload["Duplicate of"] = originalIssueUrl;
-            } else if (validateError) {
-              payload["Validation Error"] = `❌ ${validateError}`;
-            } else if (priorTicket) {
-              payload["Action"] = `⚠️ ${priorTicket} already covers this extension - link it to this issue by hand.`;
-            } else {
-              payload["Jira Ticket"] = jiraKey || '❌ Not created';
-            }
-
-            // Base64 encode to prevent GitHub from masking the output
-            const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64');
-            core.setOutput('payload', encodedPayload);
+        run: python3 .github/scripts/report_submission.py
         env:
+          SUBMISSION_TYPE: ${{ needs.extract-issue-details.outputs.type }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
+          VERSION_NUMBER: ${{ needs.extract-issue-details.outputs.version_number }}
+          PR_URL: ${{ needs.extract-issue-details.outputs.url }}
+          SUBMITTER_LOGIN: ${{ github.event.issue.user.login }}
           JIRA_KEY: ${{ steps.create_jira.outputs.jira_key }}
-          VALIDATE_ERROR: ${{ needs.validate-submission.outputs.error_message }}
+          STATUS: ${{ steps.create_jira.outputs.status }}
+          REASON: ${{ steps.create_jira.outputs.reason }}
+          REVIEW_OUTCOME: ${{ steps.review_workflow.outcome }}
+          VALIDATION_ERROR: ${{ needs.validate-submission.outputs.error_message }}
           ORIGINAL_ISSUE_URL: ${{ needs.find-prior-ticket.outputs.original_issue_url }}
           PRIOR_TICKET: ${{ needs.find-prior-ticket.outputs.jira_key }}
 
@@ -483,7 +463,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      zoom_payload: ${{ steps.prepare_zoom.outputs.payload }}
+      notification: ${{ steps.prepare_notification.outputs.notification }}
 
     steps:
       - name: Checkout scripts and actions
@@ -525,62 +505,23 @@ jobs:
           issue_url: ${{ github.event.issue.html_url }}
           is_update: 'true'
 
-      - name: Prepare Zoom notification payload
-        id: prepare_zoom
+      - name: Prepare the notification
+        id: prepare_notification
+        continue-on-error: true
         if: needs.extract-issue-details.outputs.error_message == ''
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            const title = process.env.TITLE;
-            const prUrl = process.env.URL;
-            const versionNumber = process.env.VERSION_NUMBER;
-            const issueUrl = context.payload.issue.html_url;
-            const validateError = process.env.VALIDATE_ERROR;
-            const status = process.env.UPDATE_STATUS;
-            const jiraKey = process.env.JIRA_KEY;
-            const reason = process.env.UPDATE_REASON;
-            const reviewOutcome = process.env.REVIEW_OUTCOME;
-            const originalIssueUrl = process.env.ORIGINAL_ISSUE_URL;
-            const priorTicket = process.env.PRIOR_TICKET;
-
-            const payload = {
-              "Extension": title,
-              "Version": versionNumber,
-              "PR": prUrl,
-              "Issue": issueUrl
-            };
-
-            if (originalIssueUrl) {
-              payload["Duplicate of"] = originalIssueUrl;
-            } else if (validateError) {
-              // Repository link validation failed - the submission is rejected.
-              payload["Validation Error"] = `❌ ${validateError}`;
-            } else if (priorTicket) {
-              payload["Action"] = `⚠️ ${priorTicket} already covers this update - link it to this issue by hand.`;
-            } else if (status === 'automated') {
-              // Subtask created and review kicked off automatically.
-              payload["Update Ticket"] = jiraKey;
-              payload["Review"] = reviewOutcome === 'success' ? '✅ Triggered' : '⚠️ Not triggered - investigate';
-            } else {
-              // No single parent ticket matched - fall back to manual intervention.
-              payload["Action"] = "⚠️ Create associated update ticket.";
-              if (reason) {
-                payload["Reason"] = reason;
-              }
-            }
-
-            // Base64 encode to prevent GitHub from masking the output
-            const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64');
-            core.setOutput('payload', encodedPayload);
+        run: python3 .github/scripts/report_submission.py
         env:
-          URL: ${{ needs.extract-issue-details.outputs.url }}
-          VERSION_NUMBER: ${{ needs.extract-issue-details.outputs.version_number }}
+          SUBMISSION_TYPE: ${{ needs.extract-issue-details.outputs.type }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
           TITLE: ${{ needs.extract-issue-details.outputs.title }}
-          VALIDATE_ERROR: ${{ needs.validate-submission.outputs.error_message }}
-          UPDATE_STATUS: ${{ steps.create_jira.outputs.status }}
+          VERSION_NUMBER: ${{ needs.extract-issue-details.outputs.version_number }}
+          PR_URL: ${{ needs.extract-issue-details.outputs.url }}
+          SUBMITTER_LOGIN: ${{ github.event.issue.user.login }}
           JIRA_KEY: ${{ steps.create_jira.outputs.jira_key }}
-          UPDATE_REASON: ${{ steps.create_jira.outputs.reason }}
+          STATUS: ${{ steps.create_jira.outputs.status }}
+          REASON: ${{ steps.create_jira.outputs.reason }}
           REVIEW_OUTCOME: ${{ steps.review_workflow.outcome }}
+          VALIDATION_ERROR: ${{ needs.validate-submission.outputs.error_message }}
           ORIGINAL_ISSUE_URL: ${{ needs.find-prior-ticket.outputs.original_issue_url }}
           PRIOR_TICKET: ${{ needs.find-prior-ticket.outputs.jira_key }}
 
@@ -657,15 +598,15 @@ jobs:
           issue_number: ${{ github.event.issue.number }}
           duplicate_of: ${{ needs.find-prior-ticket.outputs.original_issue_url }}
 
-  notify-zoom:
+  notify-webhook:
     needs: [extract-issue-details, submit-extension, submit-update]
     if: |
       !cancelled() &&
-      (needs.submit-extension.outputs.zoom_payload != '' ||
-       needs.submit-update.outputs.zoom_payload != '')
-    uses: ./.github/workflows/common-notify-zoom.yml
+      (needs.submit-extension.outputs.notification != '' ||
+       needs.submit-update.outputs.notification != '')
+    uses: ./.github/workflows/common-notify-webhook.yml
     with:
-      payload: ${{ needs.submit-extension.outputs.zoom_payload || needs.submit-update.outputs.zoom_payload }}
+      payload: ${{ needs.submit-extension.outputs.notification || needs.submit-update.outputs.notification }}
     secrets:
-      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
-      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
+      WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}

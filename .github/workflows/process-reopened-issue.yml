@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      zoom_payload: ${{ steps.sync.outputs.zoom_payload }}
+      notification: ${{ steps.sync.outputs.notification }}
 
     steps:
       - name: Checkout scripts
@@ -42,14 +42,14 @@ jobs:
           ISSUE_ACTION: reopened
           ACTOR_LOGIN: ${{ github.event.sender.login }}
 
-  notify-zoom:
+  notify-webhook:
     needs: sync-jira-status
     if: |
       !cancelled() &&
-      needs.sync-jira-status.outputs.zoom_payload != ''
-    uses: ./.github/workflows/common-notify-zoom.yml
+      needs.sync-jira-status.outputs.notification != ''
+    uses: ./.github/workflows/common-notify-webhook.yml
     with:
-      payload: ${{ needs.sync-jira-status.outputs.zoom_payload }}
+      payload: ${{ needs.sync-jira-status.outputs.notification }}
     secrets:
-      ZOOM_WEBHOOK_URL: ${{ secrets.ZOOM_WEBHOOK_URL }}
-      ZOOM_VERIFICATION_TOKEN: ${{ secrets.ZOOM_VERIFICATION_TOKEN }}
+      WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}

@@ -1,0 +1,55 @@
+name: Notify webhook
+
+on:
+  workflow_call:
+    inputs:
+      payload:
+        description: 'Base64-encoded Notification to render and post'
+        required: true
+        type: string
+    secrets:
+      WEBHOOK_URL:
+        required: true
+      JIRA_BASE_URL:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Build the message
+        id: message
+        env:
+          PAYLOAD: ${{ inputs.payload }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+        run: python3 .github/scripts/slack_message.py
+
+      - name: Send notification
+        id: send
+        if: steps.message.outputs.message != ''
+        continue-on-error: true
+        uses: fjogeleit/http-request-action@551353b829c3646756b2ec2b3694f819d7957495 # v2.0.0
+        with:
+          url: ${{ secrets.WEBHOOK_URL }}
+          method: POST
+          contentType: application/json
+          data: ${{ steps.message.outputs.message }}
+          timeout: '10000'
+          retry: '2'
+          retryWait: '2000'
+
+      - name: Warn if the notification failed
+        if: steps.send.outcome == 'failure'
+        run: |
+          echo "::warning::Notification failed - see the previous step for the response."

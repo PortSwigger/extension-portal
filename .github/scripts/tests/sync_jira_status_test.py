@@ -7,9 +7,7 @@ Run with: python sync_jira_status_test.py
 Jira is mocked so the tests are deterministic and need no network.
 """
 
-import base64
 import io
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -19,7 +17,19 @@ from urllib import error
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import jira
+import notification as note
 import sync_jira_status as sjs
+
+
+def view(notification):
+    """A notification flattened, so assertions can read what it says."""
+    if notification is None:
+        return None
+    return {'Alert': notification.alert, 'Severity': notification.severity,
+            'Event': notification.event, 'Ticket': notification.ticket,
+            'Extension': notification.extension, 'Actor': notification.actor,
+            'Did': notification.actor_did, 'Reason': notification.reason,
+            'Action': notification.action}
 
 ISSUE_URL = 'https://github.com/PortSwigger/extension-portal/issues/42'
 
@@ -230,7 +240,7 @@ class CloseTests(unittest.TestCase):
         outcome = sjs.sync(FakeJira([]), change())
 
         self.assertEqual(outcome.status, 'absent')
-        self.assertIsNone(sjs.zoom_payload(change(), outcome))
+        self.assertIsNone(sjs.notification_for(change(), outcome))
 
 
 class ReopenTests(unittest.TestCase):
@@ -355,9 +365,44 @@ class DecisionTests(unittest.TestCase):
             self.assertTrue(decision.because, decision)
 
 
+class SubjectTests(unittest.TestCase):
+    """The headline names what was submitted, never the issue carrying it."""
+
+    def payload(self, outcome, **overrides):
+        return view(sjs.notification_for(change(**overrides), outcome))
+
+    def failed_move(self, **overrides):
+        return self.payload(sjs.Outcome('manual', ticket_key='BAPP-1',
+                                        reason='Jira said no.'), **overrides)
+
+    def test_an_extension_is_named_as_one(self):
+        self.assertEqual(self.failed_move(ISSUE_ACTION='closed')['Alert'],
+                         'Submission closed: extension')
+
+    def test_an_update_is_named_as_one(self):
+        self.assertEqual(
+            self.failed_move(ISSUE_TYPE_NAME='Update', ISSUE_ACTION='reopened')['Alert'],
+            'Submission reopened: update')
+
+    def test_a_submission_github_did_not_type_is_still_not_called_an_issue(self):
+        self.assertEqual(
+            self.failed_move(ISSUE_TYPE_NAME='', ISSUE_ACTION='reopened')['Alert'],
+            'Submission reopened')
+
+    def test_no_headline_calls_the_submission_an_issue(self):
+        outcomes = (sjs.Outcome('manual', ticket_key='BAPP-1', reason='Jira said no.'),
+                    sjs.Outcome('flagged', ticket_key='BAPP-1'))
+        for outcome in outcomes:
+            for type_name in ('Extension', 'Update', ''):
+                for action in ('closed', 'reopened'):
+                    alert = self.payload(outcome, ISSUE_TYPE_NAME=type_name,
+                                         ISSUE_ACTION=action)['Alert']
+                    self.assertNotIn('issue', alert.lower(), alert)
+
+
 class ReportingTests(unittest.TestCase):
     def payload(self, outcome, **overrides):
-        return sjs.zoom_payload(change(**overrides), outcome)
+        return view(sjs.notification_for(change(**overrides), outcome))
 
     def test_a_move_that_worked_is_not_reported(self):
         self.assertIsNone(self.payload(sjs.Outcome('moved', ticket_key='BAPP-1')))
@@ -373,8 +418,9 @@ class ReportingTests(unittest.TestCase):
                                            reason='Jira said no.',
 ))
         self.assertIn('out of the review queue', payload['Action'])
-        self.assertEqual(payload['Ticket'], 'BAPP-1 (unchanged)')
-        self.assertEqual(payload['Closed by'], 'alice')
+        self.assertEqual(payload['Ticket'], 'BAPP-1')
+        self.assertEqual(payload['Actor'], 'alice')
+        self.assertEqual(payload['Did'], 'Closed')
         self.assertEqual(payload['Reason'], 'Jira said no.')
 
     def test_a_failed_reopen_names_feedback_instead(self):
@@ -382,28 +428,26 @@ class ReportingTests(unittest.TestCase):
                                            reason='Jira said no.'),
                                ISSUE_ACTION='reopened')
         self.assertIn('back into the review queue', payload['Action'])
-        self.assertEqual(payload['Reopened by'], 'alice')
+        self.assertEqual(payload['Actor'], 'alice')
+        self.assertEqual(payload['Did'], 'Reopened')
 
     def test_a_failure_before_the_ticket_was_found_names_no_ticket(self):
-        payload = self.payload(sjs.Outcome('manual', reason='Search failed.'))
-        self.assertNotIn('Ticket', payload)
+        self.assertEqual(self.payload(sjs.Outcome('manual', reason='Search failed.'))['Ticket'],
+                         '')
 
     def test_reopening_an_approved_submission_is_reported(self):
         payload = self.payload(sjs.Outcome('flagged', ticket_key='BAPP-1',
 ),
                                ISSUE_ACTION='reopened')
-        self.assertEqual(payload['Alert'], 'Approved submission was reopened')
-        self.assertEqual(payload['Ticket'], 'BAPP-1 (unchanged)')
-
-    def test_the_payload_survives_the_round_trip_through_base64(self):
-        payload = self.payload(sjs.Outcome('manual', reason='Search failed.'))
-        decoded = json.loads(base64.b64decode(sjs.encode_payload(payload)))
-        self.assertEqual(decoded, payload)
+        self.assertEqual(payload['Alert'], 'Submission reopened: extension')
+        self.assertIn('already approved', payload['Reason'])
+        self.assertEqual(payload['Severity'], note.ATTENTION)
+        self.assertEqual(payload['Ticket'], 'BAPP-1')
 
     def test_no_issue_content_is_quoted_back_beyond_its_title_and_url(self):
-        payload = self.payload(sjs.Outcome('manual', reason='Search failed.'))
-        self.assertEqual(payload['Extension'], 'Widget')
-        self.assertEqual(payload['Issue'], ISSUE_URL)
+        reported = sjs.notification_for(change(), sjs.Outcome('manual', reason='Search failed.'))
+        self.assertEqual(reported.extension, 'Widget')
+        self.assertEqual(reported.issue_url, ISSUE_URL)
 
 
 class TicketLookupTests(unittest.TestCase):

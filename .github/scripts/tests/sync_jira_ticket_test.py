@@ -7,8 +7,6 @@ Run with: python sync_jira_ticket_test.py
 Jira is mocked so the tests are deterministic and need no network.
 """
 
-import base64
-import json
 import sys
 import unittest
 from dataclasses import fields
@@ -19,7 +17,19 @@ from urllib import error
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import jira
+import notification as note
 import sync_jira_ticket as sjt
+
+
+def view(notification):
+    """A notification flattened, so assertions can read what it says."""
+    if notification is None:
+        return None
+    return {'Alert': notification.alert, 'Severity': notification.severity,
+            'Event': notification.event, 'Ticket': notification.ticket,
+            'Extension': notification.extension, 'Editor': notification.actor,
+            'Access': notification.actor_note, 'Reason': notification.reason,
+            'Action': notification.action, **notification.changes}
 
 ISSUE_URL = 'https://github.com/PortSwigger/extension-portal/issues/42'
 
@@ -262,26 +272,26 @@ class NoTicketYetTests(unittest.TestCase):
 
     def test_the_team_is_told_and_the_wording_is_not_an_error(self):
         e, outcome = self.edited_with_no_ticket()
-        payload = sjt.zoom_payload(e, outcome)
-        self.assertEqual(payload['Alert'], 'Submission edited before its ticket was created')
-        self.assertIn('use these details when creating it', payload['Action'])
-        self.assertNotIn('Reason', payload)
+        payload = view(sjt.notification_for(e, outcome))
+        self.assertEqual(payload['Alert'], 'Submission changed: extension')
+        self.assertIn('No ticket exists', payload['Reason'])
+        self.assertIn('Use these details when creating it', payload['Action'])
 
     def test_the_edited_details_are_included(self):
         e, outcome = self.edited_with_no_ticket(SUBMISSION_TYPE='extension-update',
                                                 URL_CHANGED='true')
-        payload = sjt.zoom_payload(e, outcome)
+        payload = view(sjt.notification_for(e, outcome))
         self.assertEqual(payload['Version'], 'v2.1.0')
         self.assertEqual(payload['Pull request'], 'https://github.com/acme/new')
 
     def test_a_maintainer_editing_is_told_too(self):
         e, outcome = self.edited_with_no_ticket(IS_MAINTAINER='true', EDITOR_ACCESS='admin')
-        self.assertIsNotNone(sjt.zoom_payload(e, outcome))
+        self.assertIsNotNone(sjt.notification_for(e, outcome))
 
 
-class ZoomPayloadTests(unittest.TestCase):
+class SlackPayloadTests(unittest.TestCase):
     def payload(self, outcome, **overrides):
-        return sjt.zoom_payload(edit(**overrides), outcome)
+        return view(sjt.notification_for(edit(**overrides), outcome))
 
     @staticmethod
     def held(summary='Old Name', bapp_url='https://github.com/acme/old'):
@@ -297,18 +307,20 @@ class ZoomPayloadTests(unittest.TestCase):
     def test_reports_a_maintainer_edit_that_could_not_be_applied(self):
         payload = self.payload(sjt.Outcome('manual', reason='No ticket.'),
                                IS_MAINTAINER='true', EDITOR_LOGIN='bob', EDITOR_ACCESS='admin')
-        self.assertEqual(payload['Alert'], 'Maintainer edit could not be applied')
-        self.assertEqual(payload['Edited by'], 'bob (admin access)')
+        self.assertEqual(payload['Alert'], 'Submission changed: extension')
+        self.assertEqual(payload['Editor'], 'bob')
+        self.assertEqual(payload['Access'], 'admin access')
         self.assertEqual(payload['Reason'], 'No ticket.')
 
     def test_flagged_names_both_urls_and_the_untouched_ticket(self):
         payload = self.payload(sjt.Outcome('flagged', 'BAPP-100', held=self.held()),
                                URL_CHANGED='true')
-        self.assertEqual(payload['Alert'], 'Submission repointed at different code')
-        self.assertEqual(payload['Ticket'], 'BAPP-100 (unchanged)')
+        self.assertEqual(payload['Alert'], 'Submission changed: extension')
+        self.assertIn('different code', payload['Reason'])
+        self.assertEqual(payload['Ticket'], 'BAPP-100')
         self.assertEqual(
             payload['Extension URL'],
-            'https://github.com/acme/old -> https://github.com/acme/new')
+            'https://github.com/acme/old → https://github.com/acme/new')
 
     def test_flagged_labels_an_update_as_a_pull_request(self):
         payload = self.payload(sjt.Outcome('flagged', 'BAPP-200', held=self.held()),
@@ -317,45 +329,47 @@ class ZoomPayloadTests(unittest.TestCase):
 
     def test_reports_an_applied_submitter_edit(self):
         payload = self.payload(sjt.Outcome('updated', 'BAPP-100', ('Summary',)))
-        self.assertEqual(payload['Updated'], '✅ Summary')
+        self.assertEqual(payload['Severity'], note.ROUTINE)
 
     def test_reports_a_validation_error(self):
         payload = self.payload(sjt.Outcome('rejected'), VALIDATION_ERROR='Bad URL')
-        self.assertEqual(payload['Validation Error'], '❌ Bad URL')
+        self.assertEqual(payload['Reason'], 'Bad URL')
+        self.assertIn('rejected', payload['Action'])
 
     def test_every_payload_names_the_editor_and_their_access(self):
         for outcome, extra in [(sjt.Outcome('flagged', 'B-1'), {'URL_CHANGED': 'true'}),
                                (sjt.Outcome('updated', 'B-1', ('Summary',)), {}),
                                (sjt.Outcome('manual', reason='x'), {})]:
             payload = self.payload(outcome, **extra)
-            self.assertEqual(payload['Edited by'], 'alice (submitter access)')
+            self.assertEqual(payload['Editor'], 'alice')
+            self.assertEqual(payload['Access'], 'submitter access')
 
     def test_a_submitter_name_change_reports_both_values(self):
         payload = self.payload(sjt.Outcome('updated', 'BAPP-100', ('Summary',),
                                            held=self.held()),
                                SUMMARY_CHANGED='true')
-        self.assertEqual(payload['Name'], 'Old Name -> New Name')
+        self.assertEqual(payload['Name'], 'Old Name → New Name')
 
     def test_a_submitter_url_change_reports_both_values(self):
         payload = self.payload(sjt.Outcome('flagged', 'BAPP-100', held=self.held()),
                                URL_CHANGED='true')
         self.assertEqual(
             payload['Extension URL'],
-            'https://github.com/acme/old -> https://github.com/acme/new')
+            'https://github.com/acme/old → https://github.com/acme/new')
 
     def test_a_submitter_changing_both_reports_both(self):
         payload = self.payload(sjt.Outcome('flagged', 'BAPP-100', held=self.held()),
                                SUMMARY_CHANGED='true', URL_CHANGED='true')
-        self.assertEqual(payload['Name'], 'Old Name -> New Name')
+        self.assertEqual(payload['Name'], 'Old Name → New Name')
         self.assertEqual(
             payload['Extension URL'],
-            'https://github.com/acme/old -> https://github.com/acme/new')
+            'https://github.com/acme/old → https://github.com/acme/new')
 
     def test_an_update_reports_version_rather_than_name(self):
         payload = self.payload(sjt.Outcome('updated', 'BAPP-200', ('Summary',),
                                            held=self.held(summary='v2.0.0')),
                                SUBMISSION_TYPE='extension-update', SUMMARY_CHANGED='true')
-        self.assertEqual(payload['Version'], 'v2.0.0 -> v2.1.0')
+        self.assertEqual(payload['Version'], 'v2.0.0 → v2.1.0')
         self.assertNotIn('Name', payload)
 
     def test_an_unchanged_field_is_not_reported(self):
@@ -378,16 +392,10 @@ class ZoomPayloadTests(unittest.TestCase):
             sjt.Outcome('updated', 'BAPP-100', ('Summary',),
                         held=self.held(summary='What the ticket holds')),
             SUMMARY_CHANGED='true')
-        self.assertEqual(payload['Name'], 'What the ticket holds -> New Name')
+        self.assertEqual(payload['Name'], 'What the ticket holds → New Name')
 
     def test_the_edit_carries_no_previous_revision_at_all(self):
         self.assertNotIn('previous', ' '.join(f.name for f in fields(sjt.Edit)))
-
-    def test_encoding_round_trips(self):
-        payload = self.payload(sjt.Outcome('updated', 'BAPP-100', ('Summary',),
-                                           held=self.held()))
-        decoded = json.loads(base64.b64decode(sjt.encode_payload(payload)).decode())
-        self.assertEqual(decoded, payload)
 
 
 if __name__ == '__main__':

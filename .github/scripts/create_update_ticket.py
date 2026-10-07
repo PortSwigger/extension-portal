@@ -5,7 +5,7 @@ Creates the "BApp update" subtask under the submission ticket for the extension
 being updated, found by the source repository recorded as its bapp url.
 
 Anything other than exactly one matching parent hands over to the team, who are
-alerted via Zoom. This never fails the submission.
+alerted by the team notification. This never fails the submission.
 """
 
 import os
@@ -52,7 +52,7 @@ def create_subtask(client, parent_key, version, pull_request_url, issue_url):
 
 
 def hand_over(reason):
-    """Leave the subtask to the team, who are alerted by the Zoom notification."""
+    """Leave the subtask to the team, who are alerted by the team notification."""
     print(f'::warning::{reason}')
     set_output('status', 'manual')
     set_output('reason', reason)

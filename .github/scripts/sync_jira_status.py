@@ -2,14 +2,13 @@
 
 """Moves a submission's Jira ticket when its portal issue is closed or reopened."""
 
-import base64
-import json
 import os
 import sys
 from dataclasses import dataclass
 from urllib import error
 
 import jira
+import notification as note
 from github_actions_utils import set_output
 
 DECLINED = {'resolution': {'id': jira.DECLINED_RESOLUTION}}
@@ -47,8 +46,11 @@ class StateChange:
         )
 
     @property
+    def subject(self):
+        return note.subject_of(self.issue_type_name)
+
+    @property
     def ticket_issue_types(self):
-        # GitHub drops the issue type when the submitter lacks push access.
         if self.issue_type_name == 'Update':
             return (jira.UPDATE_SUBTASK_ISSUE_TYPE,)
         if self.issue_type_name == 'Extension':
@@ -174,36 +176,28 @@ def worth_reporting(outcome):
     return outcome.status in OUTCOMES_NEEDING_A_PERSON
 
 
-def zoom_payload(change, outcome):
+def notification_for(change, outcome):
     if not worth_reporting(outcome):
         return None
 
+    event = note.REOPENED if change.reopens_the_submission else note.CLOSED
+    reported = note.Notification(
+        event, change.subject, note.ATTENTION,
+        extension=change.title,
+        issue_url=change.issue_url,
+        ticket=outcome.ticket_key,
+        actor=change.actor,
+        actor_did=change.action.capitalize())
+
     if outcome.status == 'flagged':
-        alert = 'Approved submission was reopened'
-        detail = {'Ticket': f'{outcome.ticket_key} (unchanged)',
-                  'Action': '⚠️ This BApp was already approved - decide whether the '
-                            'ticket should come back too.'}
-    else:
-        alert = f'Issue {change.action} but its ticket did not follow'
-        moved = 'back into' if change.reopens_the_submission else 'out of'
-        detail = {'Reason': outcome.reason or 'Unknown.',
-                  'Action': f'⚠️ Move the associated ticket {moved} the review '
-                            f'queue by hand.'}
-        if outcome.ticket_key:
-            detail['Ticket'] = f'{outcome.ticket_key} (unchanged)'
+        return reported.because(
+            reason='This BApp was already approved, so its ticket was left where it is.',
+            action='Decide whether the ticket should come back too.')
 
-    return {
-        'Alert': alert,
-        'Extension': change.title,
-        'Issue': change.issue_url,
-        f'{change.action.capitalize()} by': change.actor,
-        **detail,
-    }
-
-
-def encode_payload(payload):
-    # Base64 so that GitHub does not mask fragments of the output.
-    return base64.b64encode(json.dumps(payload).encode()).decode()
+    moved = 'back into' if change.reopens_the_submission else 'out of'
+    return reported.because(
+        reason=outcome.reason or 'Unknown.',
+        action=f'Move the associated ticket {moved} the review queue by hand.')
 
 
 def report(outcome):
@@ -225,10 +219,10 @@ if __name__ == '__main__':
     outcome = sync(jira.JiraClient.from_environment(), change)
     report(outcome)
 
-    payload = zoom_payload(change, outcome)
+    reported = notification_for(change, outcome)
 
     set_output('status', outcome.status)
     set_output('jira_key', outcome.ticket_key)
-    set_output('zoom_payload', encode_payload(payload) if payload else '')
+    set_output('notification', note.encode(reported) if reported else '')
 
     sys.exit(0)

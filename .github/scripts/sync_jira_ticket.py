@@ -3,21 +3,17 @@
 """
 Applies an edited issue to its associated Jira ticket, or flags it for the team.
 
-The ticket takes its summary and its bapp url from the issue. The bapp url is
-the artifact that was reviewed, so only a maintainer may change it; a submitter
-doing so is flagged instead, because it makes this a new submission.
-
-Outcomes go to Zoom and the run log, never to the issue.
+Only a maintainer may change the bapp url: it is the artifact that was
+reviewed, so a submitter changing it makes this a new submission.
 """
 
-import base64
-import json
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from urllib import error
 
 import jira
+import notification as note
 from github_actions_utils import set_output
 from github_urls import normalize_url, repository_url
 
@@ -64,6 +60,10 @@ class Edit:
             url=env.get('SUBMITTED_URL', '').strip(),
             validation_error=env.get('VALIDATION_ERROR', '').strip(),
         )
+
+    @property
+    def subject(self):
+        return note.UPDATE if self.is_update else note.EXTENSION
 
     @property
     def ticket_issue_type(self):
@@ -173,13 +173,10 @@ def sync(client, edit):
 
 
 def changed_fields(edit, outcome):
-    """
-    What the edit did to each field, reading the before-value from the ticket so
-    that no unsanitized issue content is quoted back to the team.
-    """
+    """Read from the ticket, so no unsanitized issue content is quoted back."""
     def moved(before, after):
         after = after or '(none)'
-        return f'{before} -> {after}' if before else after
+        return f'{before} → {after}' if before else after
 
     fields = {}
     if edit.summary_changed:
@@ -191,7 +188,6 @@ def changed_fields(edit, outcome):
 
 
 def worth_reporting(edit, outcome):
-    """A maintainer's edit passes quietly unless it could not be applied."""
     if edit.validation_error:
         return True
     if outcome.status not in ('updated', 'flagged', 'manual', 'absent'):
@@ -199,50 +195,48 @@ def worth_reporting(edit, outcome):
     return not edit.is_maintainer or outcome.status in ('manual', 'absent')
 
 
-def zoom_payload(edit, outcome):
-    """The notification for this outcome, or None when there is nothing to report."""
+def notification_for(edit, outcome):
     if not worth_reporting(edit, outcome):
         return None
 
-    alert = 'Submission details edited'
+    edited = note.Notification(
+        note.CHANGED, edit.subject, note.ATTENTION,
+        extension=edit.title,
+        version=edit.version_number if edit.is_update else '',
+        issue_url=edit.issue_url,
+        ticket=outcome.ticket_key,
+        actor=edit.editor,
+        actor_did='Edited',
+        actor_note=f'{edit.editor_access} access',
+    ).moving(changed_fields(edit, outcome))
 
     if outcome.status == 'absent':
-        alert = 'Submission edited before its ticket was created'
-        detail = {'Action': 'No ticket exists for this submission yet - '
-                            'use these details when creating it.'}
-    elif edit.is_maintainer:
-        alert = 'Maintainer edit could not be applied'
-        detail = {'Reason': edit.validation_error or outcome.reason or 'Unknown.',
-                  'Action': '⚠️ Apply the edit to the associated ticket by hand.'}
-    elif edit.validation_error:
-        detail = {'Validation Error': f'❌ {edit.validation_error}',
-                  'Action': '⚠️ Ticket left unchanged - the edited details were rejected.'}
-    elif outcome.status == 'flagged':
-        alert = 'Submission repointed at different code'
-        detail = {'Ticket': f'{outcome.ticket_key} (unchanged)',
-                  'Action': '⚠️ Treat as a new submission - review has not been re-run '
-                            'and the ticket has NOT been updated.'}
-    elif outcome.status == 'updated':
-        detail = {'Ticket': outcome.ticket_key,
-                  'Updated': f'✅ {", ".join(outcome.applied)}'}
-    else:
-        detail = {'Action': '⚠️ Apply the edited details to the associated ticket.'}
-        if outcome.reason:
-            detail['Reason'] = outcome.reason
+        return edited.because(
+            reason='No ticket exists for this submission yet.',
+            action='Use these details when creating it.')
 
-    return {
-        'Alert': alert,
-        'Extension': edit.title,
-        'Issue': edit.issue_url,
-        'Edited by': f'{edit.editor} ({edit.editor_access} access)',
-        **changed_fields(edit, outcome),
-        **detail,
-    }
+    if edit.is_maintainer:
+        return edited.because(
+            reason=edit.validation_error or outcome.reason or 'Unknown.',
+            action='Apply the edit to the associated ticket by hand.')
 
+    if edit.validation_error:
+        return edited.because(
+            reason=edit.validation_error,
+            action='Ticket left unchanged - the edited details were rejected.')
 
-def encode_payload(payload):
-    """Base64 so that GitHub does not mask fragments of the output."""
-    return base64.b64encode(json.dumps(payload).encode()).decode()
+    if outcome.status == 'flagged':
+        return edited.because(
+            reason='The submitter pointed this at different code, so the ticket was '
+                   'left where it is and the review has not been re-run.',
+            action='Treat it as a new submission.')
+
+    if outcome.status == 'updated':
+        return replace(edited, severity=note.ROUTINE)
+
+    return edited.because(
+        reason=outcome.reason or 'Unknown.',
+        action='Apply the edited details to the associated ticket.')
 
 
 def report(outcome):
@@ -269,10 +263,10 @@ if __name__ == '__main__':
         outcome = sync(jira.JiraClient.from_environment(), edit)
         report(outcome)
 
-    payload = zoom_payload(edit, outcome)
+    reported = notification_for(edit, outcome)
 
     set_output('status', outcome.status)
     set_output('jira_key', outcome.ticket_key)
-    set_output('zoom_payload', encode_payload(payload) if payload else '')
+    set_output('notification', note.encode(reported) if reported else '')
 
     sys.exit(0)
