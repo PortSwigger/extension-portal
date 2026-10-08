@@ -328,6 +328,24 @@ class FailureTests(unittest.TestCase):
         self.assertIn('boom', outcome.reason)
 
 
+class TicketKeptThroughFailureTests(unittest.TestCase):
+    """A ticket we found and could not move is still a ticket we can link to."""
+
+    def test_a_workflow_with_no_way_to_the_target_still_names_the_ticket(self):
+        client = FakeJira([ticket(status_id=OPEN_STATUS)],
+                          [{'id': '151', 'name': 'Direct approval',
+                            'to': {'id': jira.APPROVED_STATUS}}])
+        self.assertEqual(sjs.sync(client, change()).ticket_key, 'BAPP-100')
+
+    def test_a_rejected_transition_still_names_the_ticket(self):
+        client = FakeJira([ticket(status_id=OPEN_STATUS)], FROM_OPEN,
+                          transition_error=http_error(400, b'resolution required'))
+        self.assertEqual(sjs.sync(client, change()).ticket_key, 'BAPP-100')
+
+    def test_a_failure_before_the_ticket_was_found_names_none(self):
+        self.assertEqual(sjs.sync(FakeJira(search_error=http_error(503)), change()).ticket_key, '')
+
+
 class DecisionTests(unittest.TestCase):
     def close(self, status_id):
         return sjs.decide(change(), status_id)

@@ -23,6 +23,7 @@ class Reopen:
         self.issue_url = value('ISSUE_URL')
         self.title = value('ISSUE_TITLE')
         self.version_number = value('VERSION_NUMBER')
+        self.ticket = value('JIRA_KEY')
         self.actor = value('ACTOR_LOGIN')
         self.board_warning = value('BOARD_WARNING')
 
@@ -45,6 +46,7 @@ def about(reopen, severity):
         extension=reopen.title,
         version=reopen.version_number,
         issue_url=reopen.issue_url,
+        ticket=reopen.ticket,
         actor=reopen.actor,
         actor_did='Resubmitted' if reopen.is_resubmit else 'Reopened')
 

@@ -17,6 +17,10 @@ OUTCOMES_NEEDING_A_PERSON = ('manual', 'flagged')
 
 
 class NeedsManualIntervention(Exception):
+    def __init__(self, message, ticket_key=''):
+        super().__init__(message)
+        self.ticket_key = ticket_key
+
     pass
 
 
@@ -140,11 +144,11 @@ def apply_decision(client, change, ticket, decision):
     except jira.TransitionUnavailable:
         raise NeedsManualIntervention(
             f'{ticket["key"]} offers no transition to where this '
-            f'{change.action} issue belongs.')
+            f'{change.action} issue belongs.', ticket['key'])
     except error.HTTPError as e:
         raise NeedsManualIntervention(
             f'Failed to move {ticket["key"]}: {e.code} '
-            f'{e.read().decode(errors="replace")}')
+            f'{e.read().decode(errors="replace")}', ticket['key'])
 
     return Outcome('moved', ticket_key=ticket['key'], moved_to=decision.move_to)
 
@@ -166,7 +170,7 @@ def sync(client, change):
     except TicketNotCreated as e:
         return Outcome('absent', reason=str(e))
     except NeedsManualIntervention as e:
-        return Outcome('manual', reason=str(e))
+        return Outcome('manual', ticket_key=e.ticket_key, reason=str(e))
     except Exception as e:
         return Outcome(
             'manual', reason=f'Unexpected error while moving the associated ticket: {e}')

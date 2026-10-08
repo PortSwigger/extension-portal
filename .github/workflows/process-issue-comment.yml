@@ -113,6 +113,7 @@ jobs:
           ISSUE_URL: ${{ github.event.issue.html_url }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_TYPE_NAME: ${{ github.event.issue.type.name }}
+          JIRA_KEY: ${{ steps.sync.outputs.jira_key }}
           ACTOR_LOGIN: ${{ github.event.comment.user.login }}
           BOARD_WARNING: ${{ steps.reopen.outputs.board_warning }}
 

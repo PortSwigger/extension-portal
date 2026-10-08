@@ -254,6 +254,26 @@ class EmptyValueGuardTests(unittest.TestCase):
         self.assertEqual(client.updates, [])
 
 
+class TicketKeptThroughFailureTests(unittest.TestCase):
+    """A ticket we found and could not change is still a ticket we can link to."""
+
+    def test_a_failed_update_still_names_the_ticket(self):
+        client = FakeJira([submission_ticket()], update_error=http_error(503))
+        outcome = sjt.sync(client, edit(SUMMARY_CHANGED='true'))
+        self.assertEqual(outcome.status, 'manual')
+        self.assertEqual(outcome.ticket_key, 'BAPP-100')
+
+    def test_an_edit_that_came_through_empty_still_names_the_ticket(self):
+        outcome = sjt.sync(FakeJira([submission_ticket()]),
+                           edit(SUMMARY_CHANGED='true', ISSUE_TITLE=''))
+        self.assertEqual(outcome.status, 'manual')
+        self.assertEqual(outcome.ticket_key, 'BAPP-100')
+
+    def test_a_failure_before_the_ticket_was_found_names_none(self):
+        outcome = sjt.sync(FakeJira(search_error=http_error(503)), edit(SUMMARY_CHANGED='true'))
+        self.assertEqual(outcome.ticket_key, '')
+
+
 class NoTicketYetTests(unittest.TestCase):
     """
     A submission that failed its checks is closed, so the edited-issue pipeline

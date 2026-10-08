@@ -26,7 +26,8 @@ OFF_THE_BOARD = 'Could not find the project board.'
 
 def reopen(**overrides):
     env = {'COMMAND': 'reopen', 'ISSUE_URL': ISSUE, 'ISSUE_TITLE': 'Autorize',
-           'ISSUE_TYPE_NAME': 'Extension', 'ACTOR_LOGIN': 'alice'}
+           'ISSUE_TYPE_NAME': 'Extension', 'JIRA_KEY': 'BAPP-1234',
+           'ACTOR_LOGIN': 'alice'}
     env.update(overrides)
     return rr.outcome(rr.Reopen(env))
 
@@ -78,6 +79,25 @@ class ResubmitTests(unittest.TestCase):
 
     def test_an_unrecognised_command_is_treated_as_a_reopen(self):
         self.assertEqual(reopen(COMMAND='').alert, 'Submission reopened: extension')
+
+
+class TicketTests(unittest.TestCase):
+    def test_the_reopened_ticket_is_named(self):
+        self.assertEqual(reopen().ticket, 'BAPP-1234')
+
+    def test_it_is_named_whether_or_not_the_board_kept_up(self):
+        self.assertEqual(reopen(BOARD_WARNING=OFF_THE_BOARD).ticket, 'BAPP-1234')
+
+    def test_a_ticket_the_pipeline_could_not_move_is_simply_absent(self):
+        self.assertEqual(reopen(JIRA_KEY='').ticket, '')
+
+    def test_the_ticket_reaches_the_subtitle_and_a_button(self):
+        message = slack_message.message_for(reopen(), 'https://example.atlassian.net')
+        [context] = [b for b in message['blocks'] if b['type'] == 'context'
+                     and b['elements'][0]['type'] == 'mrkdwn']
+        self.assertIn('BAPP-1234', context['elements'][0]['text'])
+        [actions] = [b for b in message['blocks'] if b['type'] == 'actions']
+        self.assertIn('View Jira', [e['text']['text'] for e in actions['elements']])
 
 
 class SubjectTests(unittest.TestCase):

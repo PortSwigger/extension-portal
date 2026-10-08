@@ -19,7 +19,10 @@ from github_urls import normalize_url, repository_url
 
 
 class NeedsManualIntervention(Exception):
-    """The edit could not be applied with confidence, so the team must decide."""
+    def __init__(self, message, ticket_key=''):
+        super().__init__(message)
+        self.ticket_key = ticket_key
+
 
 
 class TicketNotCreated(NeedsManualIntervention):
@@ -124,7 +127,7 @@ def changes_to_apply(edit, ticket):
         if not summary or (edit.is_update and not edit.version_number):
             raise NeedsManualIntervention(
                 f'The edited {"version number" if edit.is_update else "title"} came through '
-                f'empty, so {ticket["key"]} has been left as it was.')
+                f'empty, so {ticket["key"]} has been left as it was.', ticket['key'])
         if (held.get('summary') or '') != summary:
             fields['summary'] = summary
             applied.append('Summary')
@@ -134,7 +137,7 @@ def changes_to_apply(edit, ticket):
         if not bapp_url:
             raise NeedsManualIntervention(
                 f'The edited URL came through empty, so {ticket["key"]} has '
-                f'been left as it was.')
+                f'been left as it was.', ticket['key'])
         if normalize_url(held.get(jira.BAPP_URL_FIELD)) != normalize_url(bapp_url):
             fields[jira.BAPP_URL_FIELD] = bapp_url
             applied.append(edit.url_label)
@@ -158,7 +161,8 @@ def sync(client, edit):
             client.update_issue(ticket['key'], fields)
         except error.HTTPError as e:
             raise NeedsManualIntervention(
-                f'Failed to update {ticket["key"]}: {e.code} {e.read().decode(errors="replace")}')
+                f'Failed to update {ticket["key"]}: {e.code} '
+                f'{e.read().decode(errors="replace")}', ticket['key'])
 
         return Outcome('updated', ticket_key=ticket['key'],
                        applied=tuple(applied), held=held)
@@ -166,7 +170,7 @@ def sync(client, edit):
     except TicketNotCreated as e:
         return Outcome('absent', reason=str(e))
     except NeedsManualIntervention as e:
-        return Outcome('manual', reason=str(e))
+        return Outcome('manual', ticket_key=e.ticket_key, reason=str(e))
     except Exception as e:
         return Outcome(
             'manual', reason=f'Unexpected error while updating the associated ticket: {e}')
