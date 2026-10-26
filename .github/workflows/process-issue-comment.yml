@@ -182,7 +182,7 @@ jobs:
           app-id: ${{ secrets.PROJECT_ACCESS_APP_ID }}
           private-key: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
 
-      - name: Reopen the issue and return it to concept review
+      - name: Reopen the issue and return it to automated review
         id: reopen
         run: python3 .github/scripts/reopen_issue.py
         env:
@@ -192,7 +192,7 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_NODE_ID: ${{ github.event.issue.node_id }}
           PROJECT_OWNER: ${{ github.repository_owner }}
-          TARGET_COLUMN: Concept review
+          TARGET_COLUMN: Automated review
 
       - name: Prepare the notification
         id: prepare_notification

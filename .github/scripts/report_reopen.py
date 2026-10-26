@@ -37,7 +37,7 @@ class Reopen:
 
     @property
     def target_column(self):
-        return 'Concept review' if self.is_resubmit else 'the review board'
+        return 'Automated review' if self.is_resubmit else 'the review board'
 
 
 def about(reopen, severity):

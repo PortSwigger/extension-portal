@@ -72,7 +72,7 @@ class ResubmitTests(unittest.TestCase):
         self.assertEqual(reported.alert, 'Submission reopened: extension')
         self.assertEqual(reported.severity, note.ATTENTION)
         self.assertEqual(reported.reason, OFF_THE_BOARD)
-        self.assertIn('Concept review', reported.action)
+        self.assertIn('Automated review', reported.action)
 
     def test_the_verb_says_it_was_a_resubmission(self):
         self.assertEqual(resubmit(BOARD_WARNING=OFF_THE_BOARD).actor_did, 'Resubmitted')

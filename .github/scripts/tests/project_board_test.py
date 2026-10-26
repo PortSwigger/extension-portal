@@ -160,10 +160,10 @@ class ResolveProjectTests(unittest.TestCase):
         return pb.resolve_project(FakeClient({STATUS: response}), 'PortSwigger')
 
     def test_reads_the_board_id_and_its_columns(self):
-        project = self.resolve(status_response('Concept review', 'Done'))
+        project = self.resolve(status_response('Automated review', 'Done'))
         self.assertEqual(project.id, 'PROJ')
         self.assertEqual(project.status_field_id, 'FIELD')
-        self.assertEqual(set(project.status_options), {'concept review', 'done'})
+        self.assertEqual(set(project.status_options), {'automated review', 'done'})
 
     def test_an_invisible_project_resolves_to_nothing(self):
         # A non-organisation owner, or a token without project access.
@@ -181,25 +181,25 @@ class ResolveProjectTests(unittest.TestCase):
 class StatusTargetTests(unittest.TestCase):
     def target_for(self, column, response=None):
         project = pb.resolve_project(
-            FakeClient({STATUS: response or status_response('Concept review')}),
+            FakeClient({STATUS: response or status_response('Automated review')}),
             'PortSwigger')
         return project.status_target(column)
 
     def test_resolves_the_column_to_its_ids(self):
-        target = self.target_for('Concept review')
+        target = self.target_for('Automated review')
         self.assertEqual(
             (target.project_id, target.field_id, target.option_id),
-            ('PROJ', 'FIELD', 'OPT_Concept review'))
+            ('PROJ', 'FIELD', 'OPT_Automated review'))
 
     def test_matches_a_column_regardless_of_case_or_padding(self):
-        self.assertIsNotNone(self.target_for('  concept review '))
+        self.assertIsNotNone(self.target_for('  automated review '))
 
     def test_a_renamed_column_resolves_to_nothing(self):
         self.assertIsNone(
-            self.target_for('Concept review', status_response('Triage', 'Done')))
+            self.target_for('Automated review', status_response('Triage', 'Done')))
 
     def test_a_board_without_a_status_field_has_no_target(self):
-        self.assertIsNone(self.target_for('Concept review', {'organization': {
+        self.assertIsNone(self.target_for('Automated review', {'organization': {
             'projectV2': {'id': 'PROJ', 'field': None}}}))
 
     def test_an_empty_column_name_has_no_target(self):

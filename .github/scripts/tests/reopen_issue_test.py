@@ -27,7 +27,7 @@ import project_board as pb
 import reopen_issue as ri
 
 PROJECT = pb.Project(id='PROJ', status_field_id='FIELD',
-                     status_options={'concept review': 'OPT'})
+                     status_options={'automated review': 'OPT'})
 
 
 class MainHarness:
@@ -84,7 +84,7 @@ class ReopenIssueTests(MainHarness, unittest.TestCase):
                      {'id': 'I', 'isArchived': True},
                      {'id': 'I', 'isArchived': False}]:
             with self.subTest(item=item):
-                steps = self.run_main(item=item, column='Concept review')
+                steps = self.run_main(item=item, column='Automated review')
                 self.assertEqual(steps[-1], 'set_status')
                 self.assertLess(steps.index('reopen'), steps.index('set_status'))
 
@@ -118,7 +118,7 @@ class ReopenIssueTests(MainHarness, unittest.TestCase):
         self.assertEqual(self.run_main(project=None), ['reopen'])
 
     def test_an_invisible_project_skips_the_column_rather_than_crashing(self):
-        self.assertEqual(self.run_main(project=None, column='Concept review'),
+        self.assertEqual(self.run_main(project=None, column='Automated review'),
                          ['reopen'])
 
     def test_a_renamed_column_does_not_undo_the_reopen(self):
@@ -154,7 +154,7 @@ class BoardWarningTests(MainHarness, unittest.TestCase):
             with self.subTest(item=item):
                 self.assertEqual(self.warning(item=item), '')
                 self.assertEqual(
-                    self.warning(item=item, column='Concept review'), '')
+                    self.warning(item=item, column='Automated review'), '')
 
     def test_an_unreachable_board_is_reported(self):
         for failure in [pb.GraphQLError('rate limited'),
@@ -176,7 +176,7 @@ class BoardWarningTests(MainHarness, unittest.TestCase):
         # skipped, and silence would leave the card wherever it landed.
         self.assertIn('did not say which card',
                       self.warning(item=None, new_item_id=None,
-                                   column='Concept review'))
+                                   column='Automated review'))
 
     def test_the_warning_is_always_set_even_when_empty(self):
         self.run_main(item=None)

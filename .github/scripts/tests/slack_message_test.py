@@ -137,13 +137,13 @@ class SeverityTests(unittest.TestCase):
 
 class BodyTests(unittest.TestCase):
     def test_short_facts_sit_on_a_line_each_in_one_block(self):
-        reported = notified().moving({'Board': 'off the board', 'Queue': 'Concept review'})
+        reported = notified().moving({'Board': 'off the board', 'Queue': 'Automated review'})
         self.assertEqual(len(of_type(reported, 'section')), 1)
         self.assertEqual(lines(reported),
-                         ['*Board:* off the board', '*Queue:* Concept review'])
+                         ['*Board:* off the board', '*Queue:* Automated review'])
 
     def test_no_two_column_grid_is_used(self):
-        for block in blocks_of(notified().moving({'Board': 'off', 'Queue': 'Concept review'})):
+        for block in blocks_of(notified().moving({'Board': 'off', 'Queue': 'Automated review'})):
             self.assertNotIn('fields', block)
 
     def test_a_long_value_gets_a_block_with_its_label_above_it(self):
