@@ -23,10 +23,12 @@ jobs:
       notification: ${{ steps.sync.outputs.notification }}
 
     steps:
-      - name: Checkout scripts
+      - name: Checkout scripts and actions
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/scripts
+            .github/actions
           sparse-checkout-cone-mode: false
 
       - name: Return the associated ticket to the review queue
@@ -41,6 +43,18 @@ jobs:
           ISSUE_TYPE_NAME: ${{ github.event.issue.type.name }}
           ISSUE_ACTION: reopened
           ACTOR_LOGIN: ${{ github.event.sender.login }}
+
+      - name: Check whether the author addressed the review feedback
+        continue-on-error: true
+        if: |
+          steps.sync.outputs.jira_key != '' &&
+          github.event.sender.login == github.event.issue.user.login
+        uses: ./.github/actions/trigger-feedback-check
+        with:
+          app_id: ${{ secrets.PROJECT_ACCESS_APP_ID }}
+          private_key: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
+          issue_url: ${{ github.event.issue.html_url }}
+          jira_ticket: ${{ steps.sync.outputs.jira_key }}
 
   notify-webhook:
     needs: sync-jira-status

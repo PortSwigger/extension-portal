@@ -104,6 +104,19 @@ jobs:
           ISSUE_ACTION: reopened
           ACTOR_LOGIN: ${{ github.event.comment.user.login }}
 
+      - name: Check whether the author addressed the review feedback
+        continue-on-error: true
+        if: |
+          !cancelled() &&
+          steps.sync.outputs.jira_key != '' &&
+          github.event.comment.user.login == github.event.issue.user.login
+        uses: ./.github/actions/trigger-feedback-check
+        with:
+          app_id: ${{ secrets.PROJECT_ACCESS_APP_ID }}
+          private_key: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
+          issue_url: ${{ github.event.issue.html_url }}
+          jira_ticket: ${{ steps.sync.outputs.jira_key }}
+
       - name: Prepare the notification
         id: prepare_notification
         continue-on-error: true
