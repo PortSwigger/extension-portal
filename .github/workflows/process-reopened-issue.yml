@@ -54,7 +54,6 @@ jobs:
           app_id: ${{ secrets.PROJECT_ACCESS_APP_ID }}
           private_key: ${{ secrets.PROJECT_ACCESS_PRIVATE_KEY }}
           issue_url: ${{ github.event.issue.html_url }}
-          jira_ticket: ${{ steps.sync.outputs.jira_key }}
 
   notify-webhook:
     needs: sync-jira-status

@@ -13,9 +13,6 @@ inputs:
   issue_url:
     description: Link to the reopened GitHub issue.
     required: true
-  jira_ticket:
-    description: Jira ticket key to record the verdict against.
-    required: true
 
 runs:
   using: composite
@@ -37,12 +34,10 @@ runs:
         REF: main
         GH_TOKEN: ${{ steps.generate_token.outputs.token }}
         ISSUE_URL: ${{ inputs.issue_url }}
-        JIRA_TICKET: ${{ inputs.jira_ticket }}
       run: |
         gh workflow run "$WORKFLOW_FILE" \
           --repo "$OWNER/$REPO" \
           --ref "$REF" \
-          -f issue_url="$ISSUE_URL" \
-          -f jira_ticket="$JIRA_TICKET"
+          -f issue_url="$ISSUE_URL"
 
         echo "Workflow dispatch triggered successfully"
