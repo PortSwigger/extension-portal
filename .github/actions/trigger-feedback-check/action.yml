@@ -1,0 +1,43 @@
+name: Trigger feedback check
+description: >-
+  Generate a scoped token for extension-portal-internal and dispatch the
+  workflow that checks whether a reopened issue addressed its review feedback.
+
+inputs:
+  app_id:
+    description: GitHub App ID with access to extension-portal-internal.
+    required: true
+  private_key:
+    description: GitHub App private key.
+    required: true
+  issue_url:
+    description: Link to the reopened GitHub issue.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Generate GitHub App token
+      id: generate_token
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      with:
+        app-id: ${{ inputs.app_id }}
+        private-key: ${{ inputs.private_key }}
+        repositories: extension-portal-internal
+
+    - name: Dispatch feedback check workflow
+      shell: bash
+      env:
+        OWNER: PortSwigger
+        REPO: extension-portal-internal
+        WORKFLOW_FILE: verify-reopened-feedback.yml
+        REF: main
+        GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+        ISSUE_URL: ${{ inputs.issue_url }}
+      run: |
+        gh workflow run "$WORKFLOW_FILE" \
+          --repo "$OWNER/$REPO" \
+          --ref "$REF" \
+          -f issue_url="$ISSUE_URL"
+
+        echo "Workflow dispatch triggered successfully"
