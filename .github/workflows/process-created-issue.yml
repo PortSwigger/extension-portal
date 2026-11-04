@@ -143,7 +143,9 @@ jobs:
        needs.extract-issue-details.outputs.type == 'extension-update') &&
       needs.extract-issue-details.outputs.error_message == '' &&
       needs.find-prior-ticket.outputs.original_issue_url == ''
-    runs-on: ubuntu-latest
+    # Pinned to 24.04: safer-runner-action's sudoers template is rejected by the
+    # sudo-rs that ubuntu-latest ships from 26.04 onwards.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
